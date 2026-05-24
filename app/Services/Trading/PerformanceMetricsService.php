@@ -14,7 +14,7 @@ class PerformanceMetricsService
     {
         $orderedTrades = $trades
             ->sortBy([
-                fn (object $trade): int => $trade->closed_at?->timestamp ?? 0,
+                fn (object $trade): int => $trade->exit_time?->timestamp ?? 0,
                 fn (object $trade): int => $trade->id ?? 0,
             ])
             ->values();
@@ -28,7 +28,7 @@ class PerformanceMetricsService
         $monthly = [];
 
         foreach ($orderedTrades as $index => $trade) {
-            $profit = (float) $trade->profit;
+            $profit = (float) $trade->net_profit;
             $equity += $profit;
             $peak = max($peak, $equity);
 
@@ -38,7 +38,7 @@ class PerformanceMetricsService
             $maxDrawdown = min($maxDrawdown, $drawdown);
             $maxDrawdownPercent = min($maxDrawdownPercent, $drawdownPercent);
 
-            $date = $trade->closed_at;
+            $date = $trade->exit_time;
             $label = $date?->format('d/m/Y H:i') ?? (string) ($index + 1);
 
             $equityCurve[] = [
@@ -95,7 +95,7 @@ class PerformanceMetricsService
             $monthlyTable[] = $row;
         }
 
-        $profits = $orderedTrades->map(fn (object $trade): float => (float) $trade->profit);
+        $profits = $orderedTrades->map(fn (object $trade): float => (float) $trade->net_profit);
         $winningTrades = $profits->filter(fn (float $profit): bool => $profit > 0);
         $losingTrades = $profits->filter(fn (float $profit): bool => $profit < 0);
         $grossProfit = (float) $winningTrades->sum();

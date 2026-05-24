@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Strategies\Schemas;
 
+use App\Models\Strategy;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -18,12 +19,10 @@ class StrategyInfolist
                             ->label('Nome'),
                         TextEntry::make('asset')
                             ->label('Ativo')
+                            ->formatStateUsing(fn (?string $state): ?string => Strategy::assetOptions()[$state] ?? $state)
                             ->badge(),
-                        TextEntry::make('trades_count')
-                            ->label('Trades')
-                            ->state(fn ($record): int => $record->trades()->count()),
                     ])
-                    ->columns(3),
+                    ->columns(2),
             ]);
     }
 }

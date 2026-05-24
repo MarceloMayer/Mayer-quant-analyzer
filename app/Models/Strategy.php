@@ -10,9 +10,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['name', 'asset'])]
 class Strategy extends Model
 {
-    public const ASSET_MINI_INDICE = 'Mini-Índice';
+    public const ASSET_MINI_INDICE = 'mini_indice';
 
-    public const ASSET_MINI_DOLAR = 'Mini-Dólar';
+    public const ASSET_MINI_DOLAR = 'mini_dolar';
 
     /**
      * @return array<string, string>
@@ -20,8 +20,8 @@ class Strategy extends Model
     public static function assetOptions(): array
     {
         return [
-            self::ASSET_MINI_INDICE => self::ASSET_MINI_INDICE,
-            self::ASSET_MINI_DOLAR => self::ASSET_MINI_DOLAR,
+            self::ASSET_MINI_INDICE => 'Mini-Índice',
+            self::ASSET_MINI_DOLAR => 'Mini-Dólar',
         ];
     }
 
@@ -32,6 +32,13 @@ class Strategy extends Model
 
     public function portfolios(): BelongsToMany
     {
-        return $this->belongsToMany(Portfolio::class)->withTimestamps();
+        return $this->belongsToMany(Portfolio::class)
+            ->withPivot(['enabled', 'weight'])
+            ->withTimestamps();
+    }
+
+    public function strategyImports(): HasMany
+    {
+        return $this->hasMany(StrategyImport::class);
     }
 }

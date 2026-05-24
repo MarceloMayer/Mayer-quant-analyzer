@@ -3,11 +3,12 @@
 namespace App\Filament\Resources\Strategies\Tables;
 
 use App\Filament\Actions\ImportMt5CsvAction;
+use App\Filament\Resources\Strategies\StrategyResource;
 use App\Models\Strategy;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ViewAction;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -24,14 +25,11 @@ class StrategiesTable
                     ->sortable(),
                 TextColumn::make('asset')
                     ->label('Ativo')
+                    ->formatStateUsing(fn (?string $state): ?string => Strategy::assetOptions()[$state] ?? $state)
                     ->badge()
                     ->sortable(),
-                TextColumn::make('trades_count')
-                    ->label('Trades')
-                    ->counts('trades')
-                    ->sortable(),
-                TextColumn::make('updated_at')
-                    ->label('Atualizado em')
+                TextColumn::make('created_at')
+                    ->label('Data de criação')
                     ->dateTime('d/m/Y H:i')
                     ->sortable(),
             ])
@@ -41,14 +39,13 @@ class StrategiesTable
                     ->options(Strategy::assetOptions()),
             ])
             ->recordActions([
-                ViewAction::make(),
                 EditAction::make(),
+                DeleteAction::make(),
                 ImportMt5CsvAction::make(),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
+                Action::make('viewResults')
+                    ->label('Ver resultados')
+                    ->icon(Heroicon::OutlinedChartBarSquare)
+                    ->url(fn (Strategy $record): string => StrategyResource::getUrl('results', ['record' => $record])),
             ]);
     }
 }

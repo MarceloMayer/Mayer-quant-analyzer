@@ -13,7 +13,8 @@ return new class extends Migration
     {
         Schema::create('portfolios', function (Blueprint $table) {
             $table->id();
-            $table->string('name')->unique();
+            $table->string('name');
+            $table->text('description')->nullable();
             $table->timestamps();
         });
     }

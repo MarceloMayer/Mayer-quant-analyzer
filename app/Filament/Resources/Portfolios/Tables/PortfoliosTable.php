@@ -2,10 +2,12 @@
 
 namespace App\Filament\Resources\Portfolios\Tables;
 
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
+use App\Filament\Resources\Portfolios\PortfolioResource;
+use App\Models\Portfolio;
+use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ViewAction;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
@@ -20,11 +22,11 @@ class PortfoliosTable
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('strategies_count')
-                    ->label('Estratégias')
+                    ->label('Quantidade de estratégias')
                     ->counts('strategies')
                     ->sortable(),
-                TextColumn::make('updated_at')
-                    ->label('Atualizado em')
+                TextColumn::make('created_at')
+                    ->label('Data de criação')
                     ->dateTime('d/m/Y H:i')
                     ->sortable(),
             ])
@@ -32,13 +34,12 @@ class PortfoliosTable
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
                 EditAction::make(),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
+                DeleteAction::make(),
+                Action::make('viewResults')
+                    ->label('Ver resultados')
+                    ->icon(Heroicon::OutlinedChartBarSquare)
+                    ->url(fn (Portfolio $record): string => PortfolioResource::getUrl('results', ['record' => $record])),
             ]);
     }
 }

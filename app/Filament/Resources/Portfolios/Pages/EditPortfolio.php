@@ -3,9 +3,11 @@
 namespace App\Filament\Resources\Portfolios\Pages;
 
 use App\Filament\Resources\Portfolios\PortfolioResource;
+use App\Models\Portfolio;
+use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
-use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Support\Icons\Heroicon;
 
 class EditPortfolio extends EditRecord
 {
@@ -14,7 +16,10 @@ class EditPortfolio extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            ViewAction::make(),
+            Action::make('viewResults')
+                ->label('Ver resultados')
+                ->icon(Heroicon::OutlinedChartBarSquare)
+                ->url(fn (Portfolio $record): string => PortfolioResource::getUrl('results', ['record' => $record])),
             DeleteAction::make(),
         ];
     }

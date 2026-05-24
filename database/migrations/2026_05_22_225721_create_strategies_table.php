@@ -14,10 +14,8 @@ return new class extends Migration
         Schema::create('strategies', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->enum('asset', ['Mini-Índice', 'Mini-Dólar']);
+            $table->enum('asset', ['mini_indice', 'mini_dolar']);
             $table->timestamps();
-
-            $table->unique(['name', 'asset']);
         });
     }
 

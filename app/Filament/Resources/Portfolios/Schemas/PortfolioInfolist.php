@@ -16,9 +16,14 @@ class PortfolioInfolist
                     ->schema([
                         TextEntry::make('name')
                             ->label('Nome'),
+                        TextEntry::make('description')
+                            ->label('Descrição')
+                            ->placeholder('-')
+                            ->columnSpanFull(),
                         TextEntry::make('strategies_count')
-                            ->label('Estratégias')
-                            ->state(fn ($record): int => $record->strategies()->count()),
+                            ->label('Quantidade de estratégias')
+                            ->state(fn ($record): int => $record->strategies()->count())
+                            ->columnSpanFull(),
                     ])
                     ->columns(2),
             ]);

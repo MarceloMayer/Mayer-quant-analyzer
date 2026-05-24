@@ -5,7 +5,7 @@ namespace App\Filament\Resources\Portfolios;
 use App\Filament\Resources\Portfolios\Pages\CreatePortfolio;
 use App\Filament\Resources\Portfolios\Pages\EditPortfolio;
 use App\Filament\Resources\Portfolios\Pages\ListPortfolios;
-use App\Filament\Resources\Portfolios\Pages\ViewPortfolio;
+use App\Filament\Resources\Portfolios\Pages\PortfolioResultsPage;
 use App\Filament\Resources\Portfolios\Schemas\PortfolioForm;
 use App\Filament\Resources\Portfolios\Schemas\PortfolioInfolist;
 use App\Filament\Resources\Portfolios\Tables\PortfoliosTable;
@@ -28,7 +28,7 @@ class PortfolioResource extends Resource
 
     protected static ?string $navigationLabel = 'Portfólios';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     public static function form(Schema $schema): Schema
     {
@@ -57,7 +57,7 @@ class PortfolioResource extends Resource
         return [
             'index' => ListPortfolios::route('/'),
             'create' => CreatePortfolio::route('/create'),
-            'view' => ViewPortfolio::route('/{record}'),
+            'results' => PortfolioResultsPage::route('/{record}/results'),
             'edit' => EditPortfolio::route('/{record}/edit'),
         ];
     }

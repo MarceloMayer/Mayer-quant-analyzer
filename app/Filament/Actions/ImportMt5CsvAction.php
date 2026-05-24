@@ -3,7 +3,7 @@
 namespace App\Filament\Actions;
 
 use App\Models\Strategy;
-use App\Services\Trading\Mt5CsvImportService;
+use App\Services\Imports\TradeImportService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Notifications\Notification;
@@ -31,20 +31,23 @@ class ImportMt5CsvAction
     private static function base(string $name): Action
     {
         return Action::make($name)
-            ->label('Carregar CSV MT5')
+            ->label('Carregar resultado do MT5')
             ->icon(Heroicon::OutlinedArrowUpTray)
             ->modalHeading('Carregar resultado do MT5')
             ->modalSubmitActionLabel('Importar')
             ->schema([
                 FileUpload::make('csv_file')
-                    ->label('Arquivo CSV')
+                    ->label('Arquivo CSV ou XLSX')
                     ->disk('local')
                     ->directory('imports/mt5')
+                    ->preserveFilenames()
                     ->acceptedFileTypes([
                         'text/csv',
                         'text/plain',
                         'application/csv',
                         'application/vnd.ms-excel',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'application/octet-stream',
                     ])
                     ->required(),
             ]);
@@ -59,7 +62,7 @@ class ImportMt5CsvAction
 
         if ($storedPath === null) {
             Notification::make()
-                ->title('Arquivo CSV não encontrado')
+                ->title('Arquivo não encontrado')
                 ->danger()
                 ->send();
 
@@ -67,19 +70,19 @@ class ImportMt5CsvAction
         }
 
         try {
-            $result = app(Mt5CsvImportService::class)->import(
+            $result = app(TradeImportService::class)->import(
                 $strategy,
                 Storage::disk('local')->path($storedPath),
             );
 
             Notification::make()
-                ->title('CSV importado')
-                ->body("Trades importados: {$result['imported']}. Linhas ignoradas: {$result['skipped']}.")
+                ->title('Arquivo importado')
+                ->body(self::resultMessage($result))
                 ->success()
                 ->send();
         } catch (\Throwable $exception) {
             Notification::make()
-                ->title('Falha ao importar CSV')
+                ->title('Falha ao importar arquivo')
                 ->body($exception->getMessage())
                 ->danger()
                 ->send();
@@ -100,5 +103,20 @@ class ImportMt5CsvAction
         }
 
         return is_string($path) && $path !== '' ? $path : null;
+    }
+
+    /**
+     * @param  array{total_rows: int, imported_rows: int, ignored_rows: int, warnings?: array<int, string>}  $result
+     */
+    private static function resultMessage(array $result): string
+    {
+        $message = "Linhas: {$result['total_rows']}. Importadas: {$result['imported_rows']}. Ignoradas: {$result['ignored_rows']}.";
+        $warnings = count($result['warnings'] ?? []);
+
+        if ($warnings > 0) {
+            $message .= " Avisos: {$warnings}.";
+        }
+
+        return $message;
     }
 }

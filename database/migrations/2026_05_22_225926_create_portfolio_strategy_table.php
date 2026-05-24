@@ -15,9 +15,12 @@ return new class extends Migration
             $table->id();
             $table->foreignId('portfolio_id')->constrained()->cascadeOnDelete();
             $table->foreignId('strategy_id')->constrained()->cascadeOnDelete();
+            $table->boolean('enabled')->default(true);
+            $table->decimal('weight', 18, 8)->default(1);
             $table->timestamps();
 
-            $table->unique(['portfolio_id', 'strategy_id']);
+            $table->index('portfolio_id');
+            $table->index('strategy_id');
         });
     }
 
