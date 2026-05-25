@@ -70,8 +70,8 @@ class PortfolioConsolidatedTradesTable extends TableWidget
                     ->color(fn (mixed $state): string => $this->moneyColor($state))
                     ->sortable(),
 
-                TextColumn::make('net_profit')
-                    ->label('Resultado consolidado')
+                TextColumn::make('cumulative_net_profit')
+                    ->label('Valor acumulado')
                     ->alignment(Alignment::End)
                     ->formatStateUsing(fn (mixed $state): string => $this->formatSignedMoney($state))
                     ->color(fn (mixed $state): string => $this->moneyColor($state))

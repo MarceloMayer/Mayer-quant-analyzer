@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Portfolios\Pages;
 use App\Filament\Resources\Portfolios\PortfolioResource;
 use App\Models\Portfolio;
 use App\Services\Metrics\PortfolioAnalyzerService;
+use App\Services\Metrics\PortfolioCorrelationService;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\View;
@@ -16,6 +17,10 @@ class PortfolioResultsPage extends ViewRecord
 
     protected static ?string $title = 'Resultados do Portfólio';
 
+    public string $correlationPeriod = PortfolioCorrelationService::PERIOD_MONTHLY;
+
+    public string $correlationMetric = PortfolioCorrelationService::METRIC_PROFIT_LOSS;
+
     public function content(Schema $schema): Schema
     {
         return $schema
@@ -24,6 +29,11 @@ class PortfolioResultsPage extends ViewRecord
                     ->viewData(fn (): array => [
                         'portfolio' => $this->portfolio(),
                         'metrics' => app(PortfolioAnalyzerService::class)->calculate($this->portfolio()),
+                        'correlation' => app(PortfolioCorrelationService::class)->calculate(
+                            $this->portfolio(),
+                            $this->correlationPeriod,
+                            $this->correlationMetric,
+                        ),
                     ]),
             ]);
     }

@@ -180,25 +180,40 @@ class PortfolioAnalyzerService
      */
     private function summarizedTrades(Collection $trades): array
     {
+        $cumulativeNetProfit = 0.0;
+
         return $trades
             ->sort(fn (object $first, object $second): int => [
-                $this->exitTime($second)?->getTimestamp() ?? 0,
-                (int) data_get($second, 'id', 0),
-            ] <=> [
                 $this->exitTime($first)?->getTimestamp() ?? 0,
                 (int) data_get($first, 'id', 0),
+            ] <=> [
+                $this->exitTime($second)?->getTimestamp() ?? 0,
+                (int) data_get($second, 'id', 0),
             ])
-            ->map(fn (object $trade): array => [
-                'id' => data_get($trade, 'id'),
-                'strategy_id' => data_get($trade, 'strategy_id'),
-                'strategy_name' => data_get($trade, 'strategy_name'),
-                'asset' => data_get($trade, 'asset'),
-                'direction' => data_get($trade, 'direction'),
-                'volume' => data_get($trade, 'volume'),
-                'exit_time' => $this->exitTime($trade)?->format('Y-m-d H:i:s'),
-                'original_net_profit' => round((float) data_get($trade, 'original_net_profit', 0), 2),
-                'weight' => round((float) data_get($trade, 'weight', 1), 8),
-                'net_profit' => round((float) data_get($trade, 'net_profit', 0), 2),
+            ->map(function (object $trade) use (&$cumulativeNetProfit): array {
+                $netProfit = (float) data_get($trade, 'net_profit', 0);
+                $cumulativeNetProfit += $netProfit;
+
+                return [
+                    'id' => data_get($trade, 'id'),
+                    'strategy_id' => data_get($trade, 'strategy_id'),
+                    'strategy_name' => data_get($trade, 'strategy_name'),
+                    'asset' => data_get($trade, 'asset'),
+                    'direction' => data_get($trade, 'direction'),
+                    'volume' => data_get($trade, 'volume'),
+                    'exit_time' => $this->exitTime($trade)?->format('Y-m-d H:i:s'),
+                    'original_net_profit' => round((float) data_get($trade, 'original_net_profit', 0), 2),
+                    'weight' => round((float) data_get($trade, 'weight', 1), 8),
+                    'net_profit' => round($netProfit, 2),
+                    'cumulative_net_profit' => round($cumulativeNetProfit, 2),
+                ];
+            })
+            ->sort(fn (array $first, array $second): int => [
+                (string) ($second['exit_time'] ?? ''),
+                (int) ($second['id'] ?? 0),
+            ] <=> [
+                (string) ($first['exit_time'] ?? ''),
+                (int) ($first['id'] ?? 0),
             ])
             ->values()
             ->all();
