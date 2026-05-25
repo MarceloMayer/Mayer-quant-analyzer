@@ -41,4 +41,9 @@ class Strategy extends Model
     {
         return $this->hasMany(StrategyImport::class);
     }
+
+    public function mt5ReportFiles(): HasMany
+    {
+        return $this->hasMany(Mt5ReportFile::class);
+    }
 }

@@ -31,6 +31,7 @@ class StrategyMetricsService
         $drawdown = $this->drawdownCalculator->calculate($equityCurve);
         $streaks = $this->streakCalculator->calculate($trades);
         $monthlyPerformance = $this->monthlyPerformanceService->calculate($trades);
+        $monthlyCumulativePerformance = $this->monthlyPerformanceService->calculateCumulative($trades);
         $daysWithoutNewHigh = $this->daysWithoutNewHighCalculator->calculate($equityCurve);
 
         $profits = $trades->map(fn (Trade $trade): float => (float) $trade->net_profit);
@@ -70,7 +71,9 @@ class StrategyMetricsService
             'equity_curve' => $equityCurve,
             'drawdown_curve' => $this->drawdownCurve($equityCurve),
             'monthly_performance' => $monthlyPerformance,
+            'monthly_cumulative_performance' => $monthlyCumulativePerformance,
             'monthly_table' => $this->monthlyTable($monthlyPerformance, $trades),
+            'strategy_trades' => $this->summarizedTrades($trades),
             'max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],
         ];
     }
@@ -97,6 +100,35 @@ class StrategyMetricsService
                     'percent' => round($drawdownPercent, 2),
                 ];
             })
+            ->all();
+    }
+
+    /**
+     * @param  Collection<int, Trade>  $trades
+     * @return array<int, array<string, mixed>>
+     */
+    private function summarizedTrades(Collection $trades): array
+    {
+        return $trades
+            ->sort(fn (Trade $first, Trade $second): int => [
+                $second->exit_time?->getTimestamp() ?? 0,
+                $second->id,
+            ] <=> [
+                $first->exit_time?->getTimestamp() ?? 0,
+                $first->id,
+            ])
+            ->map(fn (Trade $trade): array => [
+                'id' => $trade->id,
+                'asset' => $trade->asset,
+                'direction' => $trade->direction,
+                'volume' => $trade->volume === null ? null : (float) $trade->volume,
+                'entry_time' => $trade->entry_time?->format('Y-m-d H:i:s'),
+                'exit_time' => $trade->exit_time?->format('Y-m-d H:i:s'),
+                'entry_price' => $trade->entry_price === null ? null : (float) $trade->entry_price,
+                'exit_price' => $trade->exit_price === null ? null : (float) $trade->exit_price,
+                'net_profit' => round((float) $trade->net_profit, 2),
+            ])
+            ->values()
             ->all();
     }
 

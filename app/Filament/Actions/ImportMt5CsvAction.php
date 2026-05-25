@@ -3,9 +3,11 @@
 namespace App\Filament\Actions;
 
 use App\Models\Strategy;
+use App\Services\Imports\Mt5MultipleReportImportService;
 use App\Services\Imports\TradeImportService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Storage;
@@ -36,11 +38,17 @@ class ImportMt5CsvAction
             ->modalHeading('Carregar resultado do MT5')
             ->modalSubmitActionLabel('Importar')
             ->schema([
+                TextInput::make('backtest_id')
+                    ->label('Identificador do backtest')
+                    ->helperText('Use o mesmo identificador para importar relatórios XLSX de períodos diferentes do mesmo backtest.')
+                    ->default(fn (?Strategy $record): ?string => $record?->id === null ? null : 'strategy-'.$record->id)
+                    ->required(),
                 FileUpload::make('csv_file')
-                    ->label('Arquivo CSV ou XLSX')
+                    ->label('Arquivos CSV ou XLSX')
                     ->disk('local')
                     ->directory('imports/mt5')
                     ->preserveFilenames()
+                    ->multiple()
                     ->acceptedFileTypes([
                         'text/csv',
                         'text/plain',
@@ -58,9 +66,9 @@ class ImportMt5CsvAction
      */
     private static function handle(Strategy $strategy, array $data): void
     {
-        $storedPath = self::storedPath($data);
+        $storedPaths = self::storedPaths($data);
 
-        if ($storedPath === null) {
+        if ($storedPaths === []) {
             Notification::make()
                 ->title('Arquivo não encontrado')
                 ->danger()
@@ -70,10 +78,8 @@ class ImportMt5CsvAction
         }
 
         try {
-            $result = app(TradeImportService::class)->import(
-                $strategy,
-                Storage::disk('local')->path($storedPath),
-            );
+            $backtestId = self::backtestId($strategy, $data);
+            $result = self::import($strategy, $backtestId, $storedPaths);
 
             Notification::make()
                 ->title('Arquivo importado')
@@ -87,29 +93,83 @@ class ImportMt5CsvAction
                 ->danger()
                 ->send();
         } finally {
-            Storage::disk('local')->delete($storedPath);
+            Storage::disk('local')->delete($storedPaths);
         }
     }
 
     /**
      * @param  array<string, mixed>  $data
      */
-    private static function storedPath(array $data): ?string
+    private static function storedPaths(array $data): array
     {
         $path = $data['csv_file'] ?? null;
 
-        if (is_array($path)) {
-            $path = reset($path);
+        if (! is_array($path)) {
+            $path = $path === null ? [] : [$path];
         }
 
-        return is_string($path) && $path !== '' ? $path : null;
+        return array_values(array_filter($path, fn (mixed $item): bool => is_string($item) && $item !== ''));
     }
 
     /**
-     * @param  array{total_rows: int, imported_rows: int, ignored_rows: int, warnings?: array<int, string>}  $result
+     * @param  array<int, string>  $storedPaths
+     * @return array<string, mixed>
+     */
+    private static function import(Strategy $strategy, string $backtestId, array $storedPaths): array
+    {
+        if (count($storedPaths) === 1 && ! self::isXlsx($storedPaths[0])) {
+            return app(TradeImportService::class)->import(
+                $strategy,
+                Storage::disk('local')->path($storedPaths[0]),
+                $backtestId,
+            );
+        }
+
+        foreach ($storedPaths as $storedPath) {
+            if (! self::isXlsx($storedPath)) {
+                throw new \RuntimeException('Importação múltipla aceita somente arquivos XLSX do MT5.');
+            }
+        }
+
+        $files = array_map(fn (string $storedPath): array => [
+            'path' => Storage::disk('local')->path($storedPath),
+            'name' => basename($storedPath),
+        ], $storedPaths);
+
+        return app(Mt5MultipleReportImportService::class)->import($strategy, $backtestId, $files);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private static function backtestId(Strategy $strategy, array $data): string
+    {
+        $backtestId = trim((string) ($data['backtest_id'] ?? ''));
+
+        return $backtestId !== '' ? $backtestId : 'strategy-'.$strategy->id;
+    }
+
+    private static function isXlsx(string $path): bool
+    {
+        return strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'xlsx';
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
      */
     private static function resultMessage(array $result): string
     {
+        if (array_key_exists('files_received', $result)) {
+            $message = "Arquivos enviados: {$result['files_received']}. Importados: {$result['files_imported']}. Ignorados por hash: {$result['files_skipped_duplicate_hash']}. Trades encontrados: {$result['total_trades_found']}. Importados: {$result['total_trades_imported']}. Duplicados ignorados: {$result['total_trades_skipped_duplicates']}.";
+            $warnings = array_slice($result['warnings'] ?? [], 0, 3);
+
+            if ($warnings !== []) {
+                $message .= ' Avisos: '.implode(' | ', $warnings);
+            }
+
+            return $message;
+        }
+
         $message = "Linhas: {$result['total_rows']}. Importadas: {$result['imported_rows']}. Ignoradas: {$result['ignored_rows']}.";
         $warnings = count($result['warnings'] ?? []);
 

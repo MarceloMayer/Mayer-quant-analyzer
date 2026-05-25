@@ -5,29 +5,27 @@ namespace App\Services\Imports;
 use App\Models\Strategy;
 use App\Models\StrategyImport;
 use App\Models\Trade;
-use App\Services\Trading\Mt5XlsxReportParser;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class TradeImportService
 {
     public function __construct(
         private readonly CsvTradeParser $parser,
         private readonly TradeNormalizer $normalizer,
-        private readonly Mt5XlsxReportParser $xlsxReportParser,
+        private readonly Mt5MultipleReportImportService $multipleReportImportService,
     ) {}
 
     /**
      * @return array{total_rows: int, imported_rows: int, ignored_rows: int, warnings: array<int, string>}
      */
-    public function import(Strategy $strategy, UploadedFile|string $file): array
+    public function import(Strategy $strategy, UploadedFile|string $file, ?string $backtestId = null): array
     {
         $filePath = $file instanceof UploadedFile ? $file->getRealPath() : $file;
         $fileName = $file instanceof UploadedFile ? $file->getClientOriginalName() : basename($file);
 
         if ($this->isXlsx((string) $fileName, (string) $filePath)) {
-            return $this->importXlsx($strategy, (string) $filePath, (string) $fileName);
+            return $this->importXlsx($strategy, (string) $filePath, (string) $fileName, $backtestId);
         }
 
         return $this->importCsv($strategy, (string) $filePath, (string) $fileName);
@@ -84,53 +82,20 @@ class TradeImportService
     /**
      * @return array{total_rows: int, imported_rows: int, ignored_rows: int, warnings: array<int, string>}
      */
-    private function importXlsx(Strategy $strategy, string $filePath, string $fileName): array
+    private function importXlsx(Strategy $strategy, string $filePath, string $fileName, ?string $backtestId): array
     {
-        $report = $this->xlsxReportParser->parse($filePath);
-        $trades = $report['trades'] ?? [];
-        $warnings = $report['warnings'] ?? [];
-        $totalRows = count($report['transactions'] ?? []);
-        $importedRows = 0;
-        $ignoredRows = max(0, $totalRows - (count($trades) * 2));
-
-        foreach ($warnings as $warning) {
-            Log::warning('Aviso na importação de relatório XLSX do MT5.', [
-                'strategy_id' => $strategy->id,
-                'file_name' => $fileName,
-                'warning' => $warning,
-            ]);
-        }
-
-        DB::transaction(function () use ($strategy, $trades, $fileName, $totalRows, &$importedRows, &$ignoredRows): void {
-            foreach ($trades as $trade) {
-                $trade['strategy_id'] = $strategy->id;
-                $trade['asset'] = $trade['asset'] ?? $trade['symbol'] ?? $strategy->asset;
-
-                if ($this->isDuplicate($strategy, $trade)) {
-                    $ignoredRows++;
-
-                    continue;
-                }
-
-                Trade::query()->create($trade);
-                $importedRows++;
-            }
-
-            StrategyImport::query()->create([
-                'strategy_id' => $strategy->id,
-                'file_name' => $fileName,
-                'total_rows' => $totalRows,
-                'imported_rows' => $importedRows,
-                'ignored_rows' => $ignoredRows,
-                'imported_at' => now(),
-            ]);
-        });
+        $result = $this->multipleReportImportService->import($strategy, $backtestId ?? $this->defaultBacktestId($strategy), [
+            [
+                'path' => $filePath,
+                'name' => $fileName,
+            ],
+        ]);
 
         return [
-            'total_rows' => $totalRows,
-            'imported_rows' => $importedRows,
-            'ignored_rows' => $ignoredRows,
-            'warnings' => $warnings,
+            'total_rows' => $result['total_trades_found'],
+            'imported_rows' => $result['total_trades_imported'],
+            'ignored_rows' => $result['total_trades_skipped_duplicates'] + $result['files_skipped_duplicate_hash'],
+            'warnings' => $result['warnings'],
         ];
     }
 
@@ -161,5 +126,10 @@ class TradeImportService
         $extension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION) ?: pathinfo($filePath, PATHINFO_EXTENSION));
 
         return $extension === 'xlsx';
+    }
+
+    private function defaultBacktestId(Strategy $strategy): string
+    {
+        return 'strategy-'.$strategy->id;
     }
 }

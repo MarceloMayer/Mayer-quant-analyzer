@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Resources\Portfolios\PortfolioResource;
 use App\Filament\Resources\Strategies\StrategyResource;
+use App\Models\Mt5ReportFile;
 use App\Models\Portfolio;
 use App\Models\Strategy;
 use App\Models\Trade;
@@ -23,6 +24,8 @@ class Dashboard extends BaseDashboard
 
     protected static ?int $navigationSort = 0;
 
+    protected ?string $subheading = 'Visão geral das estratégias, trades importados e portfólios analisados.';
+
     public function content(Schema $schema): Schema
     {
         return $schema
@@ -30,8 +33,11 @@ class Dashboard extends BaseDashboard
                 View::make('filament.pages.dashboard')
                     ->viewData(fn (): array => [
                         'metrics' => $this->metrics(),
+                        'operational' => $this->operationalSummary(),
                         'createStrategyUrl' => StrategyResource::getUrl('create'),
                         'createPortfolioUrl' => PortfolioResource::getUrl('create'),
+                        'strategiesUrl' => StrategyResource::getUrl('index'),
+                        'portfoliosUrl' => PortfolioResource::getUrl('index'),
                     ]),
             ]);
     }
@@ -46,6 +52,33 @@ class Dashboard extends BaseDashboard
             'trades_count' => Trade::query()->count(),
             'portfolios_count' => Portfolio::query()->count(),
             'net_profit' => (float) Trade::query()->sum('net_profit'),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function operationalSummary(): array
+    {
+        $latestStrategy = Strategy::query()
+            ->latest()
+            ->first(['id', 'name', 'asset', 'created_at']);
+
+        $latestPortfolio = Portfolio::query()
+            ->latest()
+            ->first(['id', 'name', 'created_at']);
+
+        $latestReportFile = Mt5ReportFile::query()
+            ->with('strategy:id,name')
+            ->latest('imported_at')
+            ->latest()
+            ->first();
+
+        return [
+            'latest_strategy' => $latestStrategy,
+            'latest_portfolio' => $latestPortfolio,
+            'latest_report_file' => $latestReportFile,
+            'mt5_report_files_count' => Mt5ReportFile::query()->count(),
         ];
     }
 }

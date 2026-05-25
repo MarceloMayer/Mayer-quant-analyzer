@@ -9,11 +9,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'strategy_id',
     'backtest_id',
+    'mt5_report_file_id',
     'order_id',
     'entry_deal_id',
     'entry_order_id',
     'exit_deal_id',
     'exit_order_id',
+    'trade_fingerprint',
     'asset',
     'symbol',
     'direction',
@@ -34,6 +36,11 @@ class Trade extends Model
     public function strategy(): BelongsTo
     {
         return $this->belongsTo(Strategy::class);
+    }
+
+    public function mt5ReportFile(): BelongsTo
+    {
+        return $this->belongsTo(Mt5ReportFile::class);
     }
 
     /**

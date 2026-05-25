@@ -5,13 +5,11 @@ namespace App\Filament\Resources\Strategies\Pages;
 use App\Filament\Actions\ImportMt5CsvAction;
 use App\Filament\Resources\Strategies\StrategyResource;
 use App\Models\Strategy;
-use App\Models\Trade;
 use App\Services\Metrics\StrategyMetricsService;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
-use Illuminate\Database\Eloquent\Collection;
 
 class StrategyResultsPage extends ViewRecord
 {
@@ -27,9 +25,16 @@ class StrategyResultsPage extends ViewRecord
                     ->viewData(fn (): array => [
                         'strategy' => $this->strategy(),
                         'metrics' => app(StrategyMetricsService::class)->calculate($this->strategy()),
-                        'trades' => $this->trades(),
                     ]),
             ]);
+    }
+
+    public function getSubheading(): ?string
+    {
+        $strategy = $this->strategy();
+        $asset = Strategy::assetOptions()[$strategy->asset] ?? $strategy->asset;
+
+        return "{$strategy->name} - {$asset}";
     }
 
     protected function getHeaderActions(): array
@@ -46,19 +51,5 @@ class StrategyResultsPage extends ViewRecord
         $strategy = $this->record;
 
         return $strategy;
-    }
-
-    /**
-     * @return Collection<int, Trade>
-     */
-    private function trades(): Collection
-    {
-        return $this->strategy()
-            ->trades()
-            ->whereNotNull('exit_time')
-            ->orderByDesc('exit_time')
-            ->orderByDesc('id')
-            ->limit(50)
-            ->get();
     }
 }
