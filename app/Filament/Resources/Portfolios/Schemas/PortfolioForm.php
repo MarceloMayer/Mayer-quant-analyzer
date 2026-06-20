@@ -57,8 +57,8 @@ class PortfolioForm
                             ->columnSpan(4),
                     ])
                     ->columns(12)
-                    ->defaultItems(1)
-                    ->minItems(1)
+                    ->defaultItems(2)
+                    ->minItems(2)
                     ->addActionLabel('Adicionar estratégia')
                     ->reorderable(false)
                     ->columnSpanFull(),

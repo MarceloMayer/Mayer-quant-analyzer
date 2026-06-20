@@ -6,8 +6,10 @@ use App\Filament\Resources\Portfolios\PortfolioResource;
 use App\Models\Portfolio;
 use App\Services\Metrics\PortfolioAnalyzerService;
 use App\Services\Metrics\PortfolioCorrelationService;
+use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Support\Icons\Heroicon;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 
@@ -41,6 +43,11 @@ class PortfolioResultsPage extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('back')
+                ->label('Portfólios')
+                ->icon(Heroicon::OutlinedArrowLeft)
+                ->url(PortfolioResource::getUrl('index'))
+                ->color('gray'),
             EditAction::make(),
         ];
     }
