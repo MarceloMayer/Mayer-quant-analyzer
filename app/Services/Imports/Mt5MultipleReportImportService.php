@@ -8,6 +8,7 @@ use App\Models\StrategyImport;
 use App\Models\Trade;
 use App\Services\Trading\Mt5TradeFingerprintService;
 use App\Services\Trading\Mt5XlsxReportParser;
+use App\Services\Trading\StrategyBacktestExecutionUpsertService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -19,13 +20,15 @@ class Mt5MultipleReportImportService
     public function __construct(
         private readonly Mt5XlsxReportParser $parser,
         private readonly Mt5TradeFingerprintService $fingerprints,
+        private readonly StrategyBacktestExecutionUpsertService $executionUpsert,
     ) {}
 
     /**
      * @param  array<int, array{path: string, name: string}|string>  $files
+     * @param  array<string, mixed>  $executionData
      * @return array<string, mixed>
      */
-    public function import(Strategy $strategy, string $backtestId, array $files): array
+    public function import(Strategy $strategy, string $backtestId, array $files, array $executionData = []): array
     {
         $backtestId = trim($backtestId);
 
@@ -34,6 +37,7 @@ class Mt5MultipleReportImportService
         }
 
         $this->ensureExistingTradeFingerprints($strategy, $backtestId);
+        $this->executionUpsert->upsertFromImport($strategy, $backtestId, [], $executionData);
 
         $summary = [
             'files_received' => count($files),
@@ -183,6 +187,8 @@ class Mt5MultipleReportImportService
                 $reportFile->status,
                 $fileWarnings,
             );
+
+            $this->executionUpsert->upsertFromImport($strategy, $backtestId, $metadata, $executionData);
 
             if ($reportStartDate !== null && $reportEndDate !== null) {
                 $processedPeriods[] = [

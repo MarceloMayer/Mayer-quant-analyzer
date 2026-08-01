@@ -3,10 +3,13 @@
 namespace App\Filament\Actions;
 
 use App\Models\Strategy;
+use App\Models\StrategyBacktestExecution;
 use App\Services\Imports\Mt5MultipleReportImportService;
 use App\Services\Imports\TradeImportService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
@@ -43,6 +46,51 @@ class ImportMt5CsvAction
                     ->helperText('Use o mesmo identificador para importar relatórios XLSX de períodos diferentes do mesmo backtest.')
                     ->default(fn (?Strategy $record): ?string => $record?->id === null ? null : 'strategy-'.$record->id)
                     ->required(),
+                TextInput::make('execution_name')
+                    ->label('Nome da execução')
+                    ->placeholder('Ex.: Backtest principal 2020-2024')
+                    ->maxLength(255),
+                Select::make('execution_type')
+                    ->label('Tipo da execução')
+                    ->options(StrategyBacktestExecution::executionTypeOptions())
+                    ->default(StrategyBacktestExecution::TYPE_MAIN_BACKTEST)
+                    ->native(false)
+                    ->required(),
+                TextInput::make('strategy_version')
+                    ->label('Versão da estratégia')
+                    ->maxLength(255),
+                TextInput::make('timeframe')
+                    ->label('Timeframe')
+                    ->maxLength(255),
+                TextInput::make('initial_capital')
+                    ->label('Capital inicial')
+                    ->numeric(),
+                TextInput::make('initial_contracts')
+                    ->label('Quantidade inicial de contratos')
+                    ->numeric(),
+                TextInput::make('slippage')
+                    ->label('Slippage')
+                    ->numeric(),
+                TextInput::make('spread')
+                    ->label('Spread')
+                    ->numeric(),
+                TextInput::make('data_source')
+                    ->label('Origem dos dados')
+                    ->default('MetaTrader 5')
+                    ->maxLength(255),
+                Textarea::make('parameters')
+                    ->label('Parâmetros utilizados')
+                    ->helperText('JSON opcional. Se não for JSON, o texto será preservado como observação de parâmetros.')
+                    ->rows(4)
+                    ->columnSpanFull(),
+                Textarea::make('costs_description')
+                    ->label('Custos considerados')
+                    ->rows(2)
+                    ->columnSpanFull(),
+                Textarea::make('notes')
+                    ->label('Observações da execução')
+                    ->rows(3)
+                    ->columnSpanFull(),
                 FileUpload::make('csv_file')
                     ->label('Arquivos CSV ou XLSX')
                     ->disk('local')
@@ -79,7 +127,7 @@ class ImportMt5CsvAction
 
         try {
             $backtestId = self::backtestId($strategy, $data);
-            $result = self::import($strategy, $backtestId, $storedPaths);
+            $result = self::import($strategy, $backtestId, $storedPaths, $data);
 
             Notification::make()
                 ->title('Arquivo importado')
@@ -113,15 +161,17 @@ class ImportMt5CsvAction
 
     /**
      * @param  array<int, string>  $storedPaths
+     * @param  array<string, mixed>  $executionData
      * @return array<string, mixed>
      */
-    private static function import(Strategy $strategy, string $backtestId, array $storedPaths): array
+    private static function import(Strategy $strategy, string $backtestId, array $storedPaths, array $executionData): array
     {
         if (count($storedPaths) === 1 && ! self::isXlsx($storedPaths[0])) {
             return app(TradeImportService::class)->import(
                 $strategy,
                 Storage::disk('local')->path($storedPaths[0]),
                 $backtestId,
+                $executionData,
             );
         }
 
@@ -136,7 +186,7 @@ class ImportMt5CsvAction
             'name' => basename($storedPath),
         ], $storedPaths);
 
-        return app(Mt5MultipleReportImportService::class)->import($strategy, $backtestId, $files);
+        return app(Mt5MultipleReportImportService::class)->import($strategy, $backtestId, $files, $executionData);
     }
 
     /**

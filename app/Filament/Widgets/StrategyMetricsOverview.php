@@ -50,7 +50,7 @@ class StrategyMetricsOverview extends StatsOverviewWidget
                 ->color($this->ratioColor($profitFactor))
                 ->icon(Heroicon::OutlinedCalculator),
 
-            Stat::make('Payoff médio', $payoff === null ? '-' : $this->formatNumber($payoff))
+            Stat::make('Relação ganho/perda', $payoff === null ? '-' : $this->formatNumber($payoff))
                 ->color($this->ratioColor($payoff))
                 ->icon(Heroicon::OutlinedScale),
 

@@ -21,6 +21,14 @@ class EquityCurveChart extends Widget
 
     public string $heading = 'Curva de capital';
 
+    public ?string $description = null;
+
+    public string $strokeColor = '#4ade80';
+
+    public string $fillColor = '#86efac';
+
+    public string $pointColor = '#059669';
+
     /**
      * @return array<int, array{date: mixed, net_profit: float, equity: float}>
      */
@@ -31,6 +39,7 @@ class EquityCurveChart extends Widget
                 'date' => $point['date'] ?? null,
                 'net_profit' => (float) ($point['net_profit'] ?? 0),
                 'equity' => (float) ($point['equity'] ?? 0),
+                'label' => (string) ($point['label'] ?? ''),
             ])
             ->values()
             ->all();
@@ -115,7 +124,7 @@ class EquityCurveChart extends Widget
     }
 
     /**
-     * @return array<int, array{label: string, x: float}>
+     * @return array<int, array{label: string, x: float, anchor: string}>
      */
     public function xAxisTicks(): array
     {
@@ -137,6 +146,11 @@ class EquityCurveChart extends Widget
             ->map(fn (int $index): array => [
                 'label' => $this->formatDate($points[$index]['date'] ?? null),
                 'x' => 54 + (($index / $lastIndex) * 828),
+                'anchor' => match ($index) {
+                    0 => 'start',
+                    $count - 1 => 'end',
+                    default => 'middle',
+                },
             ])
             ->all();
     }
@@ -210,6 +224,11 @@ class EquityCurveChart extends Widget
     public function chartFillClasses(): string
     {
         return 'fill-emerald-100/80 dark:fill-emerald-500/20';
+    }
+
+    public function pointTooltip(array $point): string
+    {
+        return trim(($point['label'] ?: $this->formatDate($point['date'] ?? null)).' | '.$this->formatMoney($point['equity'] ?? 0));
     }
 
     private function yPosition(float $value, float $min, float $max): float

@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Strategies\Pages;
 use App\Filament\Actions\ImportMt5CsvAction;
 use App\Filament\Resources\Strategies\StrategyResource;
 use App\Models\Strategy;
+use App\Services\Metrics\StrategyExecutionComparisonService;
 use App\Services\Metrics\StrategyMetricsService;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
@@ -25,6 +26,7 @@ class StrategyResultsPage extends ViewRecord
                     ->viewData(fn (): array => [
                         'strategy' => $this->strategy(),
                         'metrics' => app(StrategyMetricsService::class)->calculate($this->strategy()),
+                        'executions' => app(StrategyExecutionComparisonService::class)->compare($this->strategy()),
                     ]),
             ]);
     }

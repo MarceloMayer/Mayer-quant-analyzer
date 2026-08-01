@@ -21,11 +21,15 @@ class StrategyTradesTable extends TableWidget
      */
     public array $trades = [];
 
+    public string $tableHeading = 'Trades da estratégia';
+
+    public string $tableDescription = 'Operações fechadas importadas para esta estratégia.';
+
     public function table(Table $table): Table
     {
         return $table
-            ->heading('Trades da estratégia')
-            ->description('Operações fechadas importadas para esta estratégia.')
+            ->heading($this->tableHeading)
+            ->description($this->tableDescription)
             ->records(fn (?string $sortColumn, ?string $sortDirection): Collection => $this->records($sortColumn, $sortDirection))
             ->columns([
                 TextColumn::make('exit_time')

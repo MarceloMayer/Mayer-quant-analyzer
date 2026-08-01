@@ -42,6 +42,11 @@ class Strategy extends Model
         return $this->hasMany(StrategyImport::class);
     }
 
+    public function backtestExecutions(): HasMany
+    {
+        return $this->hasMany(StrategyBacktestExecution::class);
+    }
+
     public function mt5ReportFiles(): HasMany
     {
         return $this->hasMany(Mt5ReportFile::class);

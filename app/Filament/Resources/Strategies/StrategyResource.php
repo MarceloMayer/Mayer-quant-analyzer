@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Strategies;
 use App\Filament\Resources\Strategies\Pages\CreateStrategy;
 use App\Filament\Resources\Strategies\Pages\EditStrategy;
 use App\Filament\Resources\Strategies\Pages\ListStrategies;
+use App\Filament\Resources\Strategies\Pages\StrategyExecutionAnalysisPage;
 use App\Filament\Resources\Strategies\Pages\StrategyResultsPage;
 use App\Filament\Resources\Strategies\Schemas\StrategyForm;
 use App\Filament\Resources\Strategies\Schemas\StrategyInfolist;
@@ -58,6 +59,7 @@ class StrategyResource extends Resource
             'index' => ListStrategies::route('/'),
             'create' => CreateStrategy::route('/create'),
             'results' => StrategyResultsPage::route('/{record}/results'),
+            'execution' => StrategyExecutionAnalysisPage::route('/{record}/executions/{backtestId}'),
             'edit' => EditStrategy::route('/{record}/edit'),
         ];
     }

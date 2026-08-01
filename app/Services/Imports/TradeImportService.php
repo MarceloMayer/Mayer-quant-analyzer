@@ -5,6 +5,8 @@ namespace App\Services\Imports;
 use App\Models\Strategy;
 use App\Models\StrategyImport;
 use App\Models\Trade;
+use App\Services\Trading\StrategyBacktestExecutionUpsertService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
@@ -14,34 +16,41 @@ class TradeImportService
         private readonly CsvTradeParser $parser,
         private readonly TradeNormalizer $normalizer,
         private readonly Mt5MultipleReportImportService $multipleReportImportService,
+        private readonly StrategyBacktestExecutionUpsertService $executionUpsert,
     ) {}
 
     /**
      * @return array{total_rows: int, imported_rows: int, ignored_rows: int, warnings: array<int, string>}
      */
-    public function import(Strategy $strategy, UploadedFile|string $file, ?string $backtestId = null): array
+    public function import(Strategy $strategy, UploadedFile|string $file, ?string $backtestId = null, array $executionData = []): array
     {
         $filePath = $file instanceof UploadedFile ? $file->getRealPath() : $file;
         $fileName = $file instanceof UploadedFile ? $file->getClientOriginalName() : basename($file);
 
         if ($this->isXlsx((string) $fileName, (string) $filePath)) {
-            return $this->importXlsx($strategy, (string) $filePath, (string) $fileName, $backtestId);
+            return $this->importXlsx($strategy, (string) $filePath, (string) $fileName, $backtestId, $executionData);
         }
 
-        return $this->importCsv($strategy, (string) $filePath, (string) $fileName);
+        return $this->importCsv($strategy, (string) $filePath, (string) $fileName, $backtestId, $executionData);
     }
 
     /**
+     * @param  array<string, mixed>  $executionData
      * @return array{total_rows: int, imported_rows: int, ignored_rows: int, warnings: array<int, string>}
      */
-    private function importCsv(Strategy $strategy, string $filePath, string $fileName): array
+    private function importCsv(Strategy $strategy, string $filePath, string $fileName, ?string $backtestId, array $executionData): array
     {
         $rows = $this->parser->parse((string) $filePath);
         $totalRows = count($rows);
         $importedRows = 0;
         $ignoredRows = 0;
+        $backtestId = $backtestId === null || trim($backtestId) === ''
+            ? $this->defaultBacktestId($strategy)
+            : trim($backtestId);
+        $periodStart = null;
+        $periodEnd = null;
 
-        DB::transaction(function () use ($strategy, $rows, $fileName, &$importedRows, &$ignoredRows): void {
+        DB::transaction(function () use ($strategy, $rows, $fileName, $backtestId, $executionData, &$importedRows, &$ignoredRows, &$periodStart, &$periodEnd): void {
             foreach ($rows as $row) {
                 $trade = $this->normalizer->normalize($strategy, $row);
 
@@ -51,6 +60,8 @@ class TradeImportService
                     continue;
                 }
 
+                $trade['backtest_id'] = $backtestId;
+
                 if ($this->isDuplicate($strategy, $trade)) {
                     $ignoredRows++;
 
@@ -59,6 +70,12 @@ class TradeImportService
 
                 Trade::query()->create($trade);
                 $importedRows++;
+                $tradeExitDate = $this->date($trade['exit_time'] ?? null);
+
+                if ($tradeExitDate !== null) {
+                    $periodStart = $periodStart === null || $tradeExitDate->lt($periodStart) ? $tradeExitDate : $periodStart;
+                    $periodEnd = $periodEnd === null || $tradeExitDate->gt($periodEnd) ? $tradeExitDate : $periodEnd;
+                }
             }
 
             StrategyImport::query()->create([
@@ -69,6 +86,11 @@ class TradeImportService
                 'ignored_rows' => $ignoredRows,
                 'imported_at' => now(),
             ]);
+
+            $this->executionUpsert->upsertFromImport($strategy, $backtestId, [
+                'start_date' => $periodStart?->toDateString(),
+                'end_date' => $periodEnd?->toDateString(),
+            ], $executionData);
         });
 
         return [
@@ -80,16 +102,17 @@ class TradeImportService
     }
 
     /**
+     * @param  array<string, mixed>  $executionData
      * @return array{total_rows: int, imported_rows: int, ignored_rows: int, warnings: array<int, string>}
      */
-    private function importXlsx(Strategy $strategy, string $filePath, string $fileName, ?string $backtestId): array
+    private function importXlsx(Strategy $strategy, string $filePath, string $fileName, ?string $backtestId, array $executionData): array
     {
         $result = $this->multipleReportImportService->import($strategy, $backtestId ?? $this->defaultBacktestId($strategy), [
             [
                 'path' => $filePath,
                 'name' => $fileName,
             ],
-        ]);
+        ], $executionData);
 
         return [
             'total_rows' => $result['total_trades_found'],
@@ -131,5 +154,18 @@ class TradeImportService
     private function defaultBacktestId(Strategy $strategy): string
     {
         return 'strategy-'.$strategy->id;
+    }
+
+    private function date(mixed $value): ?CarbonImmutable
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse((string) $value);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }
