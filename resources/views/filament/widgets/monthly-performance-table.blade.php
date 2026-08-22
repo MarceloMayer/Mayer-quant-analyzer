@@ -161,7 +161,8 @@
             </div>
         @endif
 
-        <div class="mqa-table-scroll">
+        <p class="mqa-scroll-hint">Deslize a tabela para ver todos os meses.</p>
+        <div class="mqa-table-scroll" tabindex="0" role="region" aria-label="Tabela de desempenho mensal">
             <table class="mqa-financial-table">
                 <colgroup>
                     <col style="width: 96px;">

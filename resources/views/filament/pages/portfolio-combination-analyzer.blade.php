@@ -58,7 +58,12 @@
 .pca-card-body { padding: 1.25rem; }
 
 .pca-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.pca-grid-2 > *, .pca-analysis-params > * { min-width: 0; }
 @media (max-width: 768px) { .pca-grid-2 { grid-template-columns: 1fr; } }
+
+.pca-filter-stack { display: flex; flex-direction: column; gap: .875rem; }
+.pca-analysis-params { display: grid; grid-template-columns: 1fr 1fr; gap: .875rem; }
+.pca-card-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 
 .pca-label {
     display: block;
@@ -71,6 +76,7 @@
 
 .pca-input {
     width: 100%;
+    min-width: 0;
     padding: 0.4375rem 0.75rem;
     font-size: 0.875rem;
     border: 1px solid rgb(209 213 219);
@@ -234,6 +240,20 @@
 .pca-row-number { color: rgb(156 163 175); font-size: 0.75rem; text-align: right; padding-right: 0.25rem; }
 .dark .pca-legend-title { color: rgb(249 250 251) !important; }
 .dark .pca-legend-desc  { color: rgb(156 163 175) !important; }
+
+@media (max-width: 640px) {
+    .pca-wrap { padding: 1rem 0; gap: 1.5rem; }
+    .pca-card-header, .pca-card-body { padding: .875rem 1rem; }
+    .pca-input, .pca-btn, .pca-btn-ghost { min-height: 2.75rem; font-size: 1rem; }
+    .pca-btn-sm { min-height: 2.25rem; font-size: .8125rem; }
+    .pca-strategy-item { min-height: 2.75rem; }
+    .pca-table-wrap { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+}
+
+@media (max-width: 420px) {
+    .pca-analysis-params, .pca-stat-grid { grid-template-columns: 1fr; }
+    .pca-card-actions > * { flex: 1 1 auto; }
+}
 </style>
 @endonce
 
@@ -247,7 +267,7 @@
         <div class="pca-card-body">
             <div class="pca-grid-2">
                 {{-- Filters column --}}
-                <div style="display:flex;flex-direction:column;gap:.875rem;">
+                <div class="pca-filter-stack">
                     <div>
                         <label class="pca-label">Buscar estratégia</label>
                         <input
@@ -269,7 +289,7 @@
                 </div>
 
                 {{-- Analysis params column --}}
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:.875rem;">
+                <div class="pca-analysis-params">
                     <div>
                         <label class="pca-label">Máx. estratégias por portfólio</label>
                         <input
@@ -322,7 +342,7 @@
                     selecionada{{ count($selectedStrategyIds) === 1 ? '' : 's' }}
                 @endif
             </span>
-            <div style="display:flex;gap:.5rem;">
+            <div class="pca-card-actions">
                 <button class="pca-btn-ghost" wire:click="selectAllStrategies">Selecionar todas</button>
                 <button class="pca-btn-ghost" wire:click="deselectAllStrategies">Limpar</button>
             </div>

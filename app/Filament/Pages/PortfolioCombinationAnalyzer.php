@@ -65,6 +65,7 @@ class PortfolioCombinationAnalyzer extends Page
     public function availableStrategies(): Collection
     {
         return Strategy::query()
+            ->where('user_id', auth()->id())
             ->when($this->assetFilter !== '', fn ($q) => $q->where('asset', $this->assetFilter))
             ->when($this->nameSearch !== '', fn ($q) => $q->where('name', 'like', "%{$this->nameSearch}%"))
             ->orderBy('name')
@@ -211,8 +212,26 @@ class PortfolioCombinationAnalyzer extends Page
         $this->isAnalyzed = false;
         $this->selectedToSave = [];
 
+        $this->selectedStrategyIds = collect($this->selectedStrategyIds)
+            ->map(fn (mixed $strategyId): int => (int) $strategyId)
+            ->filter(fn (int $strategyId): bool => $strategyId > 0)
+            ->unique()
+            ->values()
+            ->all();
+
         if (count($this->selectedStrategyIds) < 2) {
             $this->errorMessage = 'Selecione ao menos 2 estratégias para gerar combinações.';
+
+            return;
+        }
+
+        $ownedStrategiesCount = Strategy::query()
+            ->where('user_id', auth()->id())
+            ->whereKey($this->selectedStrategyIds)
+            ->count();
+
+        if ($ownedStrategiesCount !== count($this->selectedStrategyIds)) {
+            $this->errorMessage = 'A seleção contém estratégias às quais você não tem acesso.';
 
             return;
         }
@@ -284,11 +303,17 @@ class PortfolioCombinationAnalyzer extends Page
             return;
         }
 
-        $portfolio = Portfolio::query()->where('combination_hash', $hash)->first();
+        $portfolio = Portfolio::query()
+            ->where('user_id', auth()->id())
+            ->where('combination_hash', $hash)
+            ->first();
 
         if ($portfolio === null) {
             $this->persistPortfolio($result);
-            $portfolio = Portfolio::query()->where('combination_hash', $hash)->first();
+            $portfolio = Portfolio::query()
+                ->where('user_id', auth()->id())
+                ->where('combination_hash', $hash)
+                ->first();
         }
 
         if ($portfolio === null) {
@@ -342,18 +367,43 @@ class PortfolioCombinationAnalyzer extends Page
     private function persistPortfolio(array $result): bool
     {
         $hash = (string) $result['combination_hash'];
+        $userId = auth()->id();
+        $strategyIds = collect((array) ($result['strategy_ids'] ?? []))
+            ->map(fn (mixed $strategyId): int => (int) $strategyId)
+            ->filter(fn (int $strategyId): bool => $strategyId > 0)
+            ->unique()
+            ->values()
+            ->all();
 
-        if (Portfolio::query()->where('combination_hash', $hash)->exists()) {
+        $strategies = Strategy::query()
+            ->where('user_id', $userId)
+            ->whereKey($strategyIds)
+            ->get(['id', 'name'])
+            ->keyBy('id');
+
+        if (count($strategyIds) < 2 || $strategies->count() !== count($strategyIds)) {
             return false;
         }
 
-        $strategyIds = (array) $result['strategy_ids'];
-        $strategyNames = (array) $result['strategy_names'];
-        $count = (int) $result['strategies_count'];
+        if (Portfolio::query()
+            ->where('user_id', $userId)
+            ->where('combination_hash', $hash)
+            ->exists()) {
+            return false;
+        }
+
+        $strategyNames = array_map(
+            fn (int $strategyId): string => (string) $strategies->get($strategyId)->name,
+            $strategyIds,
+        );
+        $count = count($strategyIds);
         $score = (float) $result['consistency_score'];
 
         $number = str_pad(
-            (string) (Portfolio::query()->where('name', 'like', 'Portfolio Combo #%')->count() + 1),
+            (string) (Portfolio::query()
+                ->where('user_id', $userId)
+                ->where('name', 'like', 'Portfolio Combo #%')
+                ->count() + 1),
             3,
             '0',
             STR_PAD_LEFT,
@@ -371,11 +421,12 @@ class PortfolioCombinationAnalyzer extends Page
         }
 
         $description = 'Gerado automaticamente pelo Analisador de Combinações. '
-            . 'Estratégias: ' . implode(', ', $strategyNames) . '. '
-            . "Score de consistência no momento da geração: {$score}.";
+            .'Estratégias: '.implode(', ', $strategyNames).'. '
+            ."Score de consistência no momento da geração: {$score}.";
 
-        DB::transaction(function () use ($name, $description, $hash, $result, $strategyIds): void {
+        DB::transaction(function () use ($name, $description, $hash, $result, $strategyIds, $userId): void {
             $portfolio = Portfolio::create([
+                'user_id' => $userId,
                 'name' => $name,
                 'description' => $description,
                 'combination_hash' => $hash,

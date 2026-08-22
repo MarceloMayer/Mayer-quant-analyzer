@@ -17,6 +17,7 @@ class PortfolioAnalyzerService
         private readonly DaysWithoutNewHighCalculator $daysWithoutNewHighCalculator,
         private readonly MonthlyPerformanceService $monthlyPerformanceService,
         private readonly StreakCalculator $streakCalculator,
+        private readonly PortfolioDailyPerformanceService $dailyPerformanceService,
     ) {}
 
     /**
@@ -45,6 +46,7 @@ class PortfolioAnalyzerService
         $streaks = $this->streakCalculator->calculate($trades);
         $monthlyPerformance = $this->monthlyPerformanceService->calculate($trades);
         $monthlyCumulativePerformance = $this->monthlyPerformanceService->calculateCumulative($trades);
+        $dailyPerformance = $this->dailyPerformanceService->calculate($trades);
         $daysWithoutNewHigh = $this->daysWithoutNewHighCalculator->calculate($equityCurve);
 
         $profits = $trades->map(fn (object $trade): float => (float) data_get($trade, 'net_profit', 0));
@@ -94,6 +96,7 @@ class PortfolioAnalyzerService
             'monthly_performance' => $monthlyPerformance,
             'consolidated_monthly_cumulative_performance' => $monthlyCumulativePerformance,
             'monthly_cumulative_performance' => $monthlyCumulativePerformance,
+            'daily_performance' => $dailyPerformance,
             'monthly_table' => $this->monthlyTable($monthlyPerformance, $trades),
             'consolidated_max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],
             'max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],

@@ -10,6 +10,8 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Validation\Rules\Unique;
 
 class PortfolioForm
 {
@@ -23,7 +25,10 @@ class PortfolioForm
                             ->label('Nome')
                             ->required()
                             ->maxLength(255)
-                            ->unique(ignoreRecord: true),
+                            ->unique(
+                                ignoreRecord: true,
+                                modifyRuleUsing: fn (Unique $rule): Unique => $rule->where('user_id', auth()->id()),
+                            ),
                         Textarea::make('description')
                             ->label('Descrição')
                             ->rows(3)
@@ -36,7 +41,11 @@ class PortfolioForm
                     ->schema([
                         Select::make('strategy_id')
                             ->label('Estratégia')
-                            ->relationship('strategy', 'name')
+                            ->relationship(
+                                'strategy',
+                                'name',
+                                fn (Builder $query): Builder => $query->where('user_id', auth()->id()),
+                            )
                             ->getOptionLabelFromRecordUsing(fn (Strategy $record): string => self::strategyOptionLabel($record))
                             ->disableOptionsWhenSelectedInSiblingRepeaterItems()
                             ->searchable()
@@ -69,6 +78,6 @@ class PortfolioForm
     {
         $asset = Strategy::assetOptions()[$strategy->asset] ?? $strategy->asset;
 
-        return "{$strategy->name} ({$asset})";
+        return "{$strategy->name} ({$asset}) — Magic: {$strategy->magic_number}";
     }
 }

@@ -3,9 +3,22 @@
     $formatSignedMoney = fn (mixed $value): string => ((float) $value > 0 ? '+' : ((float) $value < 0 ? '-' : '')) . $formatMoney($value);
     $formatPercent = fn (mixed $value): string => number_format((float) $value, 2, ',', '.') . '%';
     $formatWeight = fn (mixed $value): string => number_format((float) $value, 2, ',', '.') . 'x';
+    $formatDate = function (mixed $value): string {
+        if (blank($value)) {
+            return '-';
+        }
+
+        try {
+            return \Carbon\CarbonImmutable::parse((string) $value)->format('d/m/Y');
+        } catch (\Throwable) {
+            return '-';
+        }
+    };
     $assetLabels = \App\Models\Strategy::assetOptions();
     $consolidatedTrades = $metrics['consolidated_trades'] ?? [];
     $strategySummaries = $metrics['strategy_summaries'] ?? [];
+    $dailyPerformance = $metrics['daily_performance'] ?? [];
+    $dailyRows = collect($dailyPerformance['rows'] ?? [])->take(12);
     $hasTrades = ($metrics['total_trades'] ?? 0) > 0;
     $correlationSummary = $correlation['summary'] ?? [];
 @endphp
@@ -175,6 +188,207 @@
 
         .dark .mqa-profit-neutral {
             color: rgb(156 163 175);
+        }
+
+        .mqa-daily-body {
+            padding: 1rem;
+        }
+
+        .mqa-daily-grid {
+            display: grid;
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        @media (min-width: 768px) {
+            .mqa-daily-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+
+        @media (min-width: 1280px) {
+            .mqa-daily-grid {
+                grid-template-columns: repeat(6, minmax(0, 1fr));
+            }
+        }
+
+        .mqa-daily-card {
+            border: 1px solid rgb(229 231 235);
+            border-radius: 0.5rem;
+            background: rgb(249 250 251);
+            padding: 0.875rem;
+        }
+
+        .dark .mqa-daily-card {
+            border-color: rgb(55 65 81);
+            background: rgb(15 23 42);
+        }
+
+        .mqa-daily-label {
+            color: rgb(107 114 128);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            line-height: 1rem;
+            text-transform: uppercase;
+        }
+
+        .dark .mqa-daily-label {
+            color: rgb(156 163 175);
+        }
+
+        .mqa-daily-value {
+            margin-top: 0.35rem;
+            color: rgb(17 24 39);
+            font-size: 1.25rem;
+            font-variant-numeric: tabular-nums;
+            font-weight: 750;
+            line-height: 1.75rem;
+        }
+
+        .dark .mqa-daily-value {
+            color: rgb(249 250 251);
+        }
+
+        .mqa-daily-description {
+            margin-top: 0.25rem;
+            color: rgb(107 114 128);
+            font-size: 0.75rem;
+            line-height: 1rem;
+        }
+
+        .dark .mqa-daily-description {
+            color: rgb(156 163 175);
+        }
+
+        .mqa-daily-positive {
+            color: rgb(4 120 87);
+        }
+
+        .mqa-daily-negative {
+            color: rgb(190 18 60);
+        }
+
+        .mqa-daily-neutral {
+            color: rgb(107 114 128);
+        }
+
+        .dark .mqa-daily-positive {
+            color: rgb(110 231 183);
+        }
+
+        .dark .mqa-daily-negative {
+            color: rgb(253 164 175);
+        }
+
+        .dark .mqa-daily-neutral {
+            color: rgb(156 163 175);
+        }
+
+        .mqa-daily-bar {
+            display: flex;
+            overflow: hidden;
+            height: 0.85rem;
+            border-radius: 999px;
+            background: rgb(229 231 235);
+            margin-bottom: 1rem;
+        }
+
+        .dark .mqa-daily-bar {
+            background: rgb(31 41 55);
+        }
+
+        .mqa-daily-bar-positive {
+            background: rgb(16 185 129);
+        }
+
+        .mqa-daily-bar-negative {
+            background: rgb(244 63 94);
+        }
+
+        .mqa-daily-bar-neutral {
+            background: rgb(156 163 175);
+        }
+
+        .mqa-daily-table {
+            width: 100%;
+            min-width: 560px;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 0.8125rem;
+            line-height: 1.25rem;
+        }
+
+        .mqa-daily-table th,
+        .mqa-daily-table td {
+            border: 1px solid rgb(229 231 235);
+            padding: 0.625rem 0.75rem;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .dark .mqa-daily-table th,
+        .dark .mqa-daily-table td {
+            border-color: rgb(55 65 81);
+        }
+
+        .mqa-daily-table thead th {
+            background: rgb(243 244 246);
+            color: rgb(55 65 81);
+            font-weight: 700;
+        }
+
+        .dark .mqa-daily-table thead th {
+            background: rgb(31 41 55);
+            color: rgb(229 231 235);
+        }
+
+        .mqa-daily-table tbody tr:nth-child(even) td {
+            background: rgb(249 250 251);
+        }
+
+        .dark .mqa-daily-table tbody tr:nth-child(even) td {
+            background: rgb(15 23 42);
+        }
+
+        .mqa-daily-badge {
+            display: inline-flex;
+            border-radius: 0.375rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 650;
+            line-height: 1rem;
+        }
+
+        .mqa-daily-badge-positive {
+            background: rgb(236 253 245);
+            color: rgb(4 120 87);
+        }
+
+        .mqa-daily-badge-negative {
+            background: rgb(255 241 242);
+            color: rgb(190 18 60);
+        }
+
+        .mqa-daily-badge-neutral {
+            background: rgb(243 244 246);
+            color: rgb(75 85 99);
+        }
+
+        .dark .mqa-daily-badge-positive {
+            background: rgb(6 78 59 / 0.32);
+            color: rgb(110 231 183);
+        }
+
+        .dark .mqa-daily-badge-negative {
+            background: rgb(127 29 29 / 0.35);
+            color: rgb(253 164 175);
+        }
+
+        .dark .mqa-daily-badge-neutral {
+            background: rgb(55 65 81);
+            color: rgb(209 213 219);
         }
 
         .mqa-correlation-body {
@@ -538,6 +752,12 @@
             border-color: rgb(75 85 99);
             color: rgb(156 163 175);
         }
+
+        @media (max-width: 640px) {
+            .mqa-correlation-summary {
+                gap: 1rem;
+            }
+        }
     </style>
 @endonce
 
@@ -570,6 +790,145 @@
             ])
         </div>
     @endif
+
+    <section class="mqa-strategy-card">
+        <div class="mqa-strategy-header">
+            <h3 class="mqa-strategy-title">Dias positivos vs negativos</h3>
+            <p class="mqa-strategy-description">Comparação dos dias operacionais do portfólio, consolidando o resultado líquido ponderado dos trades fechados em cada data.</p>
+        </div>
+
+        <div class="mqa-daily-body">
+            @if (! ($dailyPerformance['has_data'] ?? false))
+                <div class="mqa-correlation-empty-state">
+                    Nenhum dia operacional encontrado para calcular a comparação.
+                </div>
+            @else
+                <div class="mqa-daily-grid">
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Dias positivos</div>
+                        <div class="mqa-daily-value mqa-daily-positive">{{ number_format((int) ($dailyPerformance['positive_days'] ?? 0), 0, ',', '.') }}</div>
+                        <div class="mqa-daily-description">{{ $formatPercent($dailyPerformance['positive_day_rate'] ?? 0) }} dos dias operacionais</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Dias negativos</div>
+                        <div class="mqa-daily-value mqa-daily-negative">{{ number_format((int) ($dailyPerformance['negative_days'] ?? 0), 0, ',', '.') }}</div>
+                        <div class="mqa-daily-description">{{ $formatPercent($dailyPerformance['negative_day_rate'] ?? 0) }} dos dias operacionais</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Dias neutros</div>
+                        <div class="mqa-daily-value mqa-daily-neutral">{{ number_format((int) ($dailyPerformance['neutral_days'] ?? 0), 0, ',', '.') }}</div>
+                        <div class="mqa-daily-description">{{ $formatPercent($dailyPerformance['neutral_day_rate'] ?? 0) }} dos dias operacionais</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Média dia positivo</div>
+                        <div class="mqa-daily-value mqa-daily-positive">{{ $formatSignedMoney($dailyPerformance['average_positive_day'] ?? 0) }}</div>
+                        <div class="mqa-daily-description">Média apenas dos dias acima de zero</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Média dia negativo</div>
+                        <div class="mqa-daily-value mqa-daily-negative">{{ $formatSignedMoney($dailyPerformance['average_negative_day'] ?? 0) }}</div>
+                        <div class="mqa-daily-description">Média apenas dos dias abaixo de zero</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Relação positivo/negativo</div>
+                        <div class="mqa-daily-value">
+                            {{ ($dailyPerformance['positive_negative_ratio'] ?? null) === null ? 'Sem perdas' : number_format((float) $dailyPerformance['positive_negative_ratio'], 2, ',', '.') . 'x' }}
+                        </div>
+                        <div class="mqa-daily-description">Quantidade de dias positivos por dia negativo</div>
+                    </div>
+                </div>
+
+                <div class="mqa-daily-bar" title="Distribuição dos dias operacionais">
+                    <span class="mqa-daily-bar-positive" style="width: {{ (float) ($dailyPerformance['positive_day_rate'] ?? 0) }}%;"></span>
+                    <span class="mqa-daily-bar-negative" style="width: {{ (float) ($dailyPerformance['negative_day_rate'] ?? 0) }}%;"></span>
+                    <span class="mqa-daily-bar-neutral" style="width: {{ (float) ($dailyPerformance['neutral_day_rate'] ?? 0) }}%;"></span>
+                </div>
+
+                <div class="mqa-daily-grid">
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Melhor dia</div>
+                        <div class="mqa-daily-value mqa-daily-positive">{{ $formatSignedMoney(data_get($dailyPerformance, 'best_day.net_profit', 0)) }}</div>
+                        <div class="mqa-daily-description">{{ $formatDate(data_get($dailyPerformance, 'best_day.date')) }}</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Pior dia</div>
+                        <div class="mqa-daily-value mqa-daily-negative">{{ $formatSignedMoney(data_get($dailyPerformance, 'worst_day.net_profit', 0)) }}</div>
+                        <div class="mqa-daily-description">{{ $formatDate(data_get($dailyPerformance, 'worst_day.date')) }}</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Resultado dos dias positivos</div>
+                        <div class="mqa-daily-value mqa-daily-positive">{{ $formatSignedMoney($dailyPerformance['positive_days_net_profit'] ?? 0) }}</div>
+                        <div class="mqa-daily-description">Soma dos dias positivos</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Resultado dos dias negativos</div>
+                        <div class="mqa-daily-value mqa-daily-negative">{{ $formatSignedMoney($dailyPerformance['negative_days_net_profit'] ?? 0) }}</div>
+                        <div class="mqa-daily-description">Soma dos dias negativos</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Total de dias operacionais</div>
+                        <div class="mqa-daily-value">{{ number_format((int) ($dailyPerformance['total_days'] ?? 0), 0, ',', '.') }}</div>
+                        <div class="mqa-daily-description">Dias com pelo menos um trade fechado</div>
+                    </div>
+                </div>
+
+                <p class="mqa-scroll-hint">Últimos dias operacionais consolidados.</p>
+                <div class="mqa-strategy-scroll" tabindex="0" role="region" aria-label="Tabela de resultado diário do portfólio">
+                    <table class="mqa-daily-table">
+                        <colgroup>
+                            <col style="width: 130px;">
+                            <col style="width: 140px;">
+                            <col style="width: 120px;">
+                            <col style="width: 160px;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="mqa-left">Data</th>
+                                <th class="mqa-right">Resultado</th>
+                                <th class="mqa-right">Trades</th>
+                                <th class="mqa-left">Classificação</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($dailyRows as $day)
+                                @php
+                                    $classification = $day['classification'] ?? 'neutral';
+                                    $classificationLabel = match ($classification) {
+                                        'positive' => 'Positivo',
+                                        'negative' => 'Negativo',
+                                        default => 'Neutro',
+                                    };
+                                    $profitClass = match (true) {
+                                        (float) ($day['net_profit'] ?? 0) > 0 => 'mqa-profit-positive',
+                                        (float) ($day['net_profit'] ?? 0) < 0 => 'mqa-profit-negative',
+                                        default => 'mqa-profit-neutral',
+                                    };
+                                @endphp
+
+                                <tr>
+                                    <td class="mqa-left">{{ $formatDate($day['date'] ?? null) }}</td>
+                                    <td class="mqa-right {{ $profitClass }}">{{ $formatSignedMoney($day['net_profit'] ?? 0) }}</td>
+                                    <td class="mqa-right">{{ number_format((int) ($day['trades'] ?? 0), 0, ',', '.') }}</td>
+                                    <td class="mqa-left">
+                                        <span class="mqa-daily-badge mqa-daily-badge-{{ $classification }}">{{ $classificationLabel }}</span>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+        </div>
+    </section>
 
     <section class="mqa-strategy-card">
         <div class="mqa-strategy-header">
@@ -673,7 +1032,8 @@
                         Não há períodos suficientes com trades fechados para calcular correlação.
                     </div>
                 @else
-                    <div class="mqa-correlation-scroll">
+                    <p class="mqa-scroll-hint">Deslize a tabela para comparar todas as estratégias.</p>
+                    <div class="mqa-correlation-scroll" tabindex="0" role="region" aria-label="Matriz de correlação entre estratégias">
                         <table class="mqa-correlation-table">
                             <colgroup>
                                 <col style="width: 240px;">
@@ -717,7 +1077,8 @@
             <p class="mqa-strategy-description">Resultado e risco individual das estratégias vinculadas.</p>
         </div>
 
-        <div class="mqa-strategy-scroll">
+        <p class="mqa-scroll-hint">Deslize a tabela para ver todos os indicadores.</p>
+        <div class="mqa-strategy-scroll" tabindex="0" role="region" aria-label="Tabela de estratégias do portfólio">
             <table class="mqa-strategy-table">
                 <colgroup>
                     <col style="width: 260px;">

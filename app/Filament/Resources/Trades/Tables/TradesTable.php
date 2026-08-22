@@ -70,7 +70,11 @@ class TradesTable
             ->filters([
                 SelectFilter::make('strategy_id')
                     ->label('Estratégia')
-                    ->relationship('strategy', 'name')
+                    ->relationship(
+                        'strategy',
+                        'name',
+                        fn (Builder $query): Builder => $query->where('user_id', auth()->id()),
+                    )
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('asset')
@@ -115,7 +119,7 @@ class TradesTable
      */
     private static function assetFilterOptions(): array
     {
-        return Trade::query()
+        return self::ownedTradesQuery()
             ->whereNotNull('asset')
             ->distinct()
             ->orderBy('asset')
@@ -129,13 +133,19 @@ class TradesTable
      */
     private static function directionFilterOptions(): array
     {
-        return Trade::query()
+        return self::ownedTradesQuery()
             ->whereNotNull('direction')
             ->distinct()
             ->orderBy('direction')
             ->pluck('direction', 'direction')
             ->map(fn (string $label): string => self::formatDirection($label) ?? $label)
             ->all();
+    }
+
+    private static function ownedTradesQuery(): Builder
+    {
+        return Trade::query()
+            ->whereHas('strategy', fn (Builder $query): Builder => $query->where('user_id', auth()->id()));
     }
 
     private static function formatDirection(?string $direction): ?string

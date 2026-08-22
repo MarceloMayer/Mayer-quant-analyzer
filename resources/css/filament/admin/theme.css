@@ -1,0 +1,98 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*.php';
+@source '../../../../resources/views/filament/**/*.blade.php';
+
+/* Mobile refinements for the Filament shell and the analytical dashboards. */
+@layer components {
+    .mqa-table-scroll,
+    .mqa-execution-scroll,
+    .mqa-strategy-scroll,
+    .mqa-correlation-scroll,
+    .pca-table-wrap,
+    .fi-ta-content-ctn {
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+    }
+
+    .mqa-scroll-hint {
+        display: none;
+    }
+
+    @media (max-width: 639px) {
+        .fi-main {
+            padding-inline: 0.75rem;
+        }
+
+        .fi-page-header-main-ctn {
+            gap: 1.25rem;
+            padding-block: 1.25rem;
+        }
+
+        .fi-header-subheading {
+            margin-top: 0.25rem;
+            font-size: 1rem;
+            line-height: 1.5rem;
+        }
+
+        .fi-header-actions-ctn {
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .fi-header-actions-ctn > .fi-ac {
+            flex: 1 1 auto;
+        }
+
+        .fi-header-actions-ctn .fi-btn {
+            min-height: 2.75rem;
+        }
+
+        .fi-topbar-open-sidebar-btn {
+            min-width: 2.75rem;
+            min-height: 2.75rem;
+        }
+
+        .mqa-card-body,
+        .mqa-correlation-body,
+        .mqa-execution-scroll,
+        .mqa-strategy-scroll,
+        .mqa-table-scroll {
+            padding: 0.75rem;
+        }
+
+        .mqa-card-header,
+        .mqa-execution-header,
+        .mqa-strategy-header,
+        .mqa-report-header {
+            padding: 0.75rem;
+        }
+
+        .mqa-execution-description,
+        .mqa-strategy-description,
+        .mqa-report-description {
+            line-height: 1.2rem;
+        }
+
+        .mqa-scroll-hint {
+            display: block;
+            margin: -0.125rem 0 0.5rem;
+            color: rgb(107 114 128);
+            font-size: 0.75rem;
+            line-height: 1rem;
+        }
+
+        .dark .mqa-scroll-hint {
+            color: rgb(156 163 175);
+        }
+
+        .fi-page-content svg.h-72 {
+            height: 13.5rem !important;
+        }
+
+        .fi-page-content svg.h-80 {
+            height: 15rem !important;
+        }
+    }
+}

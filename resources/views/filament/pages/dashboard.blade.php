@@ -424,6 +424,16 @@
         .dark .mqa-status-description {
             color: rgb(156 163 175);
         }
+
+        @media (max-width: 640px) {
+            .mqa-dashboard {
+                gap: 1.5rem;
+            }
+
+            .mqa-dashboard-grid {
+                gap: 1.25rem;
+            }
+        }
     </style>
 @endonce
 

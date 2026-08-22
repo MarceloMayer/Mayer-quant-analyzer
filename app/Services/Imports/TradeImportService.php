@@ -129,6 +129,7 @@ class TradeImportService
     {
         if (! blank($trade['backtest_id'] ?? null) && ! blank($trade['exit_deal_id'] ?? null)) {
             return Trade::query()
+                ->where('strategy_id', $strategy->id)
                 ->where('backtest_id', $trade['backtest_id'])
                 ->where('exit_deal_id', $trade['exit_deal_id'])
                 ->exists();

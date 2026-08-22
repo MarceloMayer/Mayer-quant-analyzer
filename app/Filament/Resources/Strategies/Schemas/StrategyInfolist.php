@@ -17,12 +17,14 @@ class StrategyInfolist
                     ->schema([
                         TextEntry::make('name')
                             ->label('Nome'),
+                        TextEntry::make('magic_number')
+                            ->label('Magic Number'),
                         TextEntry::make('asset')
                             ->label('Ativo')
                             ->formatStateUsing(fn (?string $state): ?string => Strategy::assetOptions()[$state] ?? $state)
                             ->badge(),
                     ])
-                    ->columns(2),
+                    ->columns(3),
             ]);
     }
 }

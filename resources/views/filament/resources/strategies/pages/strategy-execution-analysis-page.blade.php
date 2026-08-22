@@ -438,6 +438,18 @@
             white-space: pre-wrap;
             overflow-wrap: anywhere;
         }
+
+        @media (max-width: 640px) {
+            .mqa-page {
+                gap: 1.5rem;
+            }
+
+            .mqa-meta-grid,
+            .mqa-summary-grid,
+            .mqa-two-columns {
+                gap: 1rem;
+            }
+        }
     </style>
 @endonce
 

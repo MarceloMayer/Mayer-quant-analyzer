@@ -13,6 +13,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class TradeResource extends Resource
 {
@@ -45,6 +46,12 @@ class TradeResource extends Resource
     public static function table(Table $table): Table
     {
         return TradesTable::configure($table);
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()
+            ->whereHas('strategy', fn (Builder $query): Builder => $query->where('user_id', auth()->id()));
     }
 
     public static function getRelations(): array

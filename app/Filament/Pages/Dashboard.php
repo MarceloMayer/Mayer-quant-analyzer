@@ -13,6 +13,7 @@ use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Builder;
 
 class Dashboard extends BaseDashboard
 {
@@ -47,11 +48,13 @@ class Dashboard extends BaseDashboard
      */
     private function metrics(): array
     {
+        $trades = $this->ownedTradesQuery();
+
         return [
-            'strategies_count' => Strategy::query()->count(),
-            'trades_count' => Trade::query()->count(),
-            'portfolios_count' => Portfolio::query()->count(),
-            'net_profit' => (float) Trade::query()->sum('net_profit'),
+            'strategies_count' => Strategy::query()->where('user_id', auth()->id())->count(),
+            'trades_count' => (clone $trades)->count(),
+            'portfolios_count' => Portfolio::query()->where('user_id', auth()->id())->count(),
+            'net_profit' => (float) $trades->sum('net_profit'),
         ];
     }
 
@@ -61,15 +64,18 @@ class Dashboard extends BaseDashboard
     private function operationalSummary(): array
     {
         $latestStrategy = Strategy::query()
+            ->where('user_id', auth()->id())
             ->latest()
             ->first(['id', 'name', 'asset', 'created_at']);
 
         $latestPortfolio = Portfolio::query()
+            ->where('user_id', auth()->id())
             ->latest()
             ->first(['id', 'name', 'created_at']);
 
         $latestReportFile = Mt5ReportFile::query()
             ->with('strategy:id,name')
+            ->whereHas('strategy', fn (Builder $query): Builder => $query->where('user_id', auth()->id()))
             ->latest('imported_at')
             ->latest()
             ->first();
@@ -78,7 +84,15 @@ class Dashboard extends BaseDashboard
             'latest_strategy' => $latestStrategy,
             'latest_portfolio' => $latestPortfolio,
             'latest_report_file' => $latestReportFile,
-            'mt5_report_files_count' => Mt5ReportFile::query()->count(),
+            'mt5_report_files_count' => Mt5ReportFile::query()
+                ->whereHas('strategy', fn (Builder $query): Builder => $query->where('user_id', auth()->id()))
+                ->count(),
         ];
+    }
+
+    private function ownedTradesQuery(): Builder
+    {
+        return Trade::query()
+            ->whereHas('strategy', fn (Builder $query): Builder => $query->where('user_id', auth()->id()));
     }
 }

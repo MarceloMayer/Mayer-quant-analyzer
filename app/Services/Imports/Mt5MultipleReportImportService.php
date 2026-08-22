@@ -75,7 +75,7 @@ class Mt5MultipleReportImportService
                 continue;
             }
 
-            if ($this->alreadyImported($backtestId, $fileHash)) {
+            if ($this->alreadyImported($strategy, $backtestId, $fileHash)) {
                 $fileWarnings[] = "Arquivo {$fileName} já foi importado anteriormente para o backtest {$backtestId}.";
                 $summary['files_skipped_duplicate_hash']++;
                 $summary['warnings'][] = $fileWarnings[0];
@@ -91,14 +91,14 @@ class Mt5MultipleReportImportService
             $trades = $report['trades'] ?? [];
             $fileWarnings = array_values($report['warnings'] ?? []);
 
-            if ($this->hasPeriodOverlap($backtestId, $reportStartDate, $reportEndDate, $processedPeriods)) {
+            if ($this->hasPeriodOverlap($strategy, $backtestId, $reportStartDate, $reportEndDate, $processedPeriods)) {
                 $fileWarnings[] = "Sobreposição de período detectada no arquivo {$fileName}. Trades duplicados serão ignorados por fingerprint.";
             }
 
             $importedTrades = 0;
             $skippedDuplicates = 0;
             $tradeFingerprints = $this->buildTradeFingerprints($strategy, $backtestId, $trades);
-            $existingFingerprints = $this->existingFingerprints($backtestId, array_values($tradeFingerprints));
+            $existingFingerprints = $this->existingFingerprints($strategy, $backtestId, array_values($tradeFingerprints));
             $seenInFile = [];
 
             $reportFile = DB::transaction(function () use (
@@ -213,9 +213,10 @@ class Mt5MultipleReportImportService
         return $summary;
     }
 
-    private function alreadyImported(string $backtestId, string $fileHash): bool
+    private function alreadyImported(Strategy $strategy, string $backtestId, string $fileHash): bool
     {
         return Mt5ReportFile::query()
+            ->where('strategy_id', $strategy->id)
             ->where('backtest_id', $backtestId)
             ->where('file_hash', $fileHash)
             ->exists();
@@ -240,13 +241,14 @@ class Mt5MultipleReportImportService
      * @param  array<int, string>  $fingerprints
      * @return array<string, true>
      */
-    private function existingFingerprints(string $backtestId, array $fingerprints): array
+    private function existingFingerprints(Strategy $strategy, string $backtestId, array $fingerprints): array
     {
         if ($fingerprints === []) {
             return [];
         }
 
         return Trade::query()
+            ->where('strategy_id', $strategy->id)
             ->where('backtest_id', $backtestId)
             ->whereIn('trade_fingerprint', array_unique($fingerprints))
             ->pluck('trade_fingerprint')
@@ -268,6 +270,7 @@ class Mt5MultipleReportImportService
                     $fingerprint = $this->fingerprints->fingerprint($strategy->id, $backtestId, $trade->toArray());
 
                     if (Trade::query()
+                        ->where('strategy_id', $strategy->id)
                         ->where('backtest_id', $backtestId)
                         ->where('trade_fingerprint', $fingerprint)
                         ->whereKeyNot($trade->id)
@@ -284,7 +287,7 @@ class Mt5MultipleReportImportService
     /**
      * @param  array<int, array{start: string, end: string, file_name: string}>  $processedPeriods
      */
-    private function hasPeriodOverlap(string $backtestId, mixed $startDate, mixed $endDate, array $processedPeriods): bool
+    private function hasPeriodOverlap(Strategy $strategy, string $backtestId, mixed $startDate, mixed $endDate, array $processedPeriods): bool
     {
         $start = $this->date($startDate);
         $end = $this->date($endDate);
@@ -300,6 +303,7 @@ class Mt5MultipleReportImportService
         }
 
         return Mt5ReportFile::query()
+            ->where('strategy_id', $strategy->id)
             ->where('backtest_id', $backtestId)
             ->whereNotNull('report_start_date')
             ->whereNotNull('report_end_date')

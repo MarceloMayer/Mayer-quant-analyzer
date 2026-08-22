@@ -208,7 +208,8 @@
             <div class="mqa-execution-title">Execuções da estratégia</div>
             <div class="mqa-execution-description">Comparação inicial por identificador de backtest, preservando a análise agregada abaixo.</div>
         </div>
-        <div class="mqa-execution-scroll">
+        <p class="mqa-scroll-hint">Deslize a tabela para ver todas as métricas.</p>
+        <div class="mqa-execution-scroll" tabindex="0" role="region" aria-label="Tabela de execuções da estratégia">
             <table class="mqa-execution-table">
                 <colgroup>
                     <col style="width: 280px;">
