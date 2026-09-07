@@ -308,7 +308,7 @@
                         <select id="sc-first-strategy" class="sc-input" wire:model.live="firstStrategyId">
                             <option value="">Selecione uma estratégia...</option>
                             @foreach ($availableStrategies as $strategy)
-                                <option value="{{ $strategy->id }}">{{ $strategy->name }}</option>
+                                <option value="{{ $strategy->id }}">{{ $strategy->is_favorite ? '★ ' : '' }}{{ $strategy->name }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -332,7 +332,7 @@
                         <select id="sc-second-strategy" class="sc-input" wire:model.live="secondStrategyId">
                             <option value="">Selecione uma estratégia...</option>
                             @foreach ($availableStrategies as $strategy)
-                                <option value="{{ $strategy->id }}">{{ $strategy->name }}</option>
+                                <option value="{{ $strategy->id }}">{{ $strategy->is_favorite ? '★ ' : '' }}{{ $strategy->name }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -370,6 +370,10 @@
                 <button type="button" class="sc-btn sc-btn-primary" wire:click="compare" wire:loading.attr="disabled">
                     <span wire:loading.remove wire:target="compare">Comparar estratégias</span>
                     <span wire:loading wire:target="compare">Calculando...</span>
+                </button>
+                <button type="button" class="sc-btn-ghost" wire:click="useFullHistory" wire:loading.attr="disabled" title="Compara usando todo o histórico disponível de ambas as estratégias, sem restringir por data">
+                    <span wire:loading.remove wire:target="useFullHistory">Histórico completo</span>
+                    <span wire:loading wire:target="useFullHistory">Calculando...</span>
                 </button>
                 <button type="button" class="sc-btn-ghost" wire:click="clearComparison">Limpar</button>
             </div>

@@ -5,48 +5,35 @@ namespace App\Services\Portfolio;
 class PortfolioCombinationGeneratorService
 {
     /**
-     * Generates all valid portfolio combinations of size 2..maxStrategies.
+     * Generates all valid portfolio combinations with exactly strategiesPerPortfolio strategies each.
      * Returns sorted inner arrays to guarantee unique order for hash comparison.
      *
      * @param  int[]  $strategyIds
      * @return array<int, int[]>
      */
-    public function generate(array $strategyIds, int $maxStrategies): array
+    public function generate(array $strategyIds, int $strategiesPerPortfolio): array
     {
         $strategyIds = array_unique($strategyIds);
         sort($strategyIds);
         $n = count($strategyIds);
-        $combinations = [];
 
-        $upperBound = min($maxStrategies, $n);
-
-        for ($k = 2; $k <= $upperBound; $k++) {
-            foreach ($this->buildCombinations($strategyIds, $k) as $combination) {
-                $combinations[] = $combination;
-            }
+        if ($strategiesPerPortfolio > $n) {
+            return [];
         }
 
-        return $combinations;
+        return $this->buildCombinations($strategyIds, $strategiesPerPortfolio);
     }
 
     /**
-     * Counts total combinations without generating them.
-     * Sum of C(n, k) for k from 2 to min(maxStrategies, n).
+     * Counts total combinations without generating them: C(n, strategiesPerPortfolio).
      */
-    public function countCombinations(int $n, int $maxStrategies): int
+    public function countCombinations(int $n, int $strategiesPerPortfolio): int
     {
-        if ($n < 2) {
+        if ($n < 2 || $strategiesPerPortfolio > $n) {
             return 0;
         }
 
-        $total = 0;
-        $upperBound = min($maxStrategies, $n);
-
-        for ($k = 2; $k <= $upperBound; $k++) {
-            $total += $this->binomialCoefficient($n, $k);
-        }
-
-        return $total;
+        return $this->binomialCoefficient($n, $strategiesPerPortfolio);
     }
 
     /**

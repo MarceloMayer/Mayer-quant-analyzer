@@ -18,7 +18,7 @@
     $consolidatedTrades = $metrics['consolidated_trades'] ?? [];
     $strategySummaries = $metrics['strategy_summaries'] ?? [];
     $dailyPerformance = $metrics['daily_performance'] ?? [];
-    $dailyRows = collect($dailyPerformance['rows'] ?? [])->take(12);
+    $dailyTable = $dailyTable ?? ['rows' => [], 'total' => 0, 'current_page' => 1, 'last_page' => 1, 'per_page' => 15];
     $hasTrades = ($metrics['total_trades'] ?? 0) > 0;
     $correlationSummary = $correlation['summary'] ?? [];
 @endphp
@@ -389,6 +389,74 @@
         .dark .mqa-daily-badge-neutral {
             background: rgb(55 65 81);
             color: rgb(209 213 219);
+        }
+
+        .mqa-pagination {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+
+        .mqa-pagination-info {
+            color: rgb(107 114 128);
+            font-size: 0.75rem;
+            line-height: 1rem;
+        }
+
+        .dark .mqa-pagination-info {
+            color: rgb(156 163 175);
+        }
+
+        .mqa-pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.625rem;
+        }
+
+        .mqa-pagination-page {
+            color: rgb(75 85 99);
+            font-size: 0.75rem;
+            font-weight: 650;
+            line-height: 1rem;
+            white-space: nowrap;
+        }
+
+        .dark .mqa-pagination-page {
+            color: rgb(209 213 219);
+        }
+
+        .mqa-pagination-button {
+            border: 1px solid rgb(209 213 219);
+            border-radius: 0.5rem;
+            background: rgb(255 255 255);
+            color: rgb(17 24 39);
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 650;
+            line-height: 1rem;
+            padding: 0.4rem 0.75rem;
+        }
+
+        .mqa-pagination-button:hover:not(:disabled) {
+            background: rgb(243 244 246);
+        }
+
+        .mqa-pagination-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .dark .mqa-pagination-button {
+            border-color: rgb(75 85 99);
+            background: rgb(31 41 55);
+            color: rgb(249 250 251);
+        }
+
+        .dark .mqa-pagination-button:hover:not(:disabled) {
+            background: rgb(55 65 81);
         }
 
         .mqa-correlation-body {
@@ -879,9 +947,65 @@
                         <div class="mqa-daily-value">{{ number_format((int) ($dailyPerformance['total_days'] ?? 0), 0, ',', '.') }}</div>
                         <div class="mqa-daily-description">Dias com pelo menos um trade fechado</div>
                     </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Sequência atual</div>
+                        @php
+                            $currentStreakType = $dailyPerformance['current_streak_type'] ?? null;
+                            $currentStreakCount = (int) ($dailyPerformance['current_streak_count'] ?? 0);
+                            $currentStreakClass = match ($currentStreakType) {
+                                'positive' => 'mqa-daily-positive',
+                                'negative' => 'mqa-daily-negative',
+                                default => 'mqa-daily-neutral',
+                            };
+                        @endphp
+                        <div class="mqa-daily-value {{ $currentStreakClass }}">{{ $currentStreakCount > 0 ? $currentStreakCount : '-' }}</div>
+                        <div class="mqa-daily-description">
+                            {{ match ($currentStreakType) {
+                                'positive' => 'dias positivos seguidos até o último dia',
+                                'negative' => 'dias negativos seguidos até o último dia',
+                                default => 'Sem sequência em andamento',
+                            } }}
+                        </div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Maior sequência positiva</div>
+                        <div class="mqa-daily-value mqa-daily-positive">{{ number_format((int) ($dailyPerformance['max_positive_streak'] ?? 0), 0, ',', '.') }}</div>
+                        <div class="mqa-daily-description">Dias positivos consecutivos, no máximo</div>
+                    </div>
+
+                    <div class="mqa-daily-card">
+                        <div class="mqa-daily-label">Maior sequência negativa</div>
+                        <div class="mqa-daily-value mqa-daily-negative">{{ number_format((int) ($dailyPerformance['max_negative_streak'] ?? 0), 0, ',', '.') }}</div>
+                        <div class="mqa-daily-description">Dias negativos consecutivos, no máximo</div>
+                    </div>
                 </div>
 
-                <p class="mqa-scroll-hint">Últimos dias operacionais consolidados.</p>
+                <div class="mqa-correlation-toolbar">
+                    <div class="mqa-correlation-filter-group">
+                        <label class="mqa-correlation-field">
+                            <span class="mqa-correlation-label">Classificação</span>
+                            <select wire:model.live="dailyFilter" class="mqa-correlation-select">
+                                <option value="all">Todos os dias</option>
+                                <option value="positive">Somente positivos</option>
+                                <option value="negative">Somente negativos</option>
+                                <option value="neutral">Somente neutros</option>
+                            </select>
+                        </label>
+
+                        <label class="mqa-correlation-field">
+                            <span class="mqa-correlation-label">Dias por página</span>
+                            <select wire:model.live="dailyPerPage" class="mqa-correlation-select">
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="60">60</option>
+                                <option value="9999">Todos</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
                 <div class="mqa-strategy-scroll" tabindex="0" role="region" aria-label="Tabela de resultado diário do portfólio">
                     <table class="mqa-daily-table">
                         <colgroup>
@@ -899,7 +1023,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach ($dailyRows as $day)
+                            @forelse ($dailyTable['rows'] as $day)
                                 @php
                                     $classification = $day['classification'] ?? 'neutral';
                                     $classificationLabel = match ($classification) {
@@ -922,9 +1046,38 @@
                                         <span class="mqa-daily-badge mqa-daily-badge-{{ $classification }}">{{ $classificationLabel }}</span>
                                     </td>
                                 </tr>
-                            @endforeach
+                            @empty
+                                <tr>
+                                    <td class="mqa-left" colspan="4">Nenhum dia encontrado para o filtro selecionado.</td>
+                                </tr>
+                            @endforelse
                         </tbody>
                     </table>
+                </div>
+
+                <div class="mqa-pagination">
+                    <span class="mqa-pagination-info">
+                        @if ($dailyTable['total'] > 0)
+                            Mostrando {{ number_format((($dailyTable['current_page'] - 1) * $dailyTable['per_page']) + 1, 0, ',', '.') }}–{{ number_format(min($dailyTable['current_page'] * $dailyTable['per_page'], $dailyTable['total']), 0, ',', '.') }} de {{ number_format($dailyTable['total'], 0, ',', '.') }} dias
+                        @else
+                            Nenhum dia para exibir
+                        @endif
+                    </span>
+                    <div class="mqa-pagination-controls">
+                        <button
+                            type="button"
+                            wire:click="previousDailyPage"
+                            @disabled($dailyTable['current_page'] <= 1)
+                            class="mqa-pagination-button"
+                        >Anterior</button>
+                        <span class="mqa-pagination-page">Página {{ $dailyTable['current_page'] }} de {{ $dailyTable['last_page'] }}</span>
+                        <button
+                            type="button"
+                            wire:click="nextDailyPage"
+                            @disabled($dailyTable['current_page'] >= $dailyTable['last_page'])
+                            class="mqa-pagination-button"
+                        >Próxima</button>
+                    </div>
                 </div>
             @endif
         </div>

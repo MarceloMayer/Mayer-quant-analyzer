@@ -119,6 +119,7 @@
 .pca-strategy-item input[type=checkbox] { width: 1rem; height: 1rem; accent-color: rgb(59 130 246); flex-shrink: 0; }
 .pca-strategy-name { font-size: 0.8125rem; color: rgb(55 65 81); flex: 1; min-width: 0; word-break: break-word; }
 .dark .pca-strategy-name { color: rgb(209 213 219); }
+.pca-favorite-star { color: rgb(245 158 11); margin-right: 0.125rem; }
 .pca-badge {
     font-size: 0.6875rem;
     font-weight: 600;
@@ -241,6 +242,40 @@
 .dark .pca-legend-title { color: rgb(249 250 251) !important; }
 .dark .pca-legend-desc  { color: rgb(156 163 175) !important; }
 
+.pca-save-bar {
+    position: sticky;
+    top: 4.25rem;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    flex-wrap: wrap;
+    padding: .75rem 1.25rem;
+    background: rgb(239 246 255);
+    border: 1px solid rgb(147 197 253);
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 12px rgb(0 0 0 / .1);
+}
+.dark .pca-save-bar { background: rgb(30 58 138 / .35); border-color: rgb(30 58 138); }
+.pca-save-bar-text { font-size: .875rem; font-weight: 600; color: rgb(29 78 216); }
+.dark .pca-save-bar-text { color: rgb(147 197 253); }
+.pca-save-bar-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+.pca-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    flex-wrap: wrap;
+    padding: .75rem 1.25rem;
+    border-top: 1px solid rgb(229 231 235);
+}
+.dark .pca-pagination { border-color: rgb(31 41 55); }
+.pca-pagination-info { font-size: .8125rem; color: rgb(107 114 128); }
+.dark .pca-pagination-info { color: rgb(156 163 175); }
+.pca-pagination-actions { display: flex; gap: .5rem; }
+
 @media (max-width: 640px) {
     .pca-wrap { padding: 1rem 0; gap: 1.5rem; }
     .pca-card-header, .pca-card-body { padding: .875rem 1rem; }
@@ -258,6 +293,29 @@
 @endonce
 
 <div class="pca-wrap">
+
+    {{-- ====================== SAVE SELECTED (STICKY TOP BAR) ====================== --}}
+    @if ($isAnalyzed && count($selectedToSave) > 0)
+        <div class="pca-save-bar">
+            <span class="pca-save-bar-text">
+                {{ count($selectedToSave) }} portfólio{{ count($selectedToSave) === 1 ? '' : 's' }} selecionado{{ count($selectedToSave) === 1 ? '' : 's' }}
+            </span>
+            <div class="pca-save-bar-actions">
+                <button class="pca-btn-ghost" wire:click="deselectAllResults">Limpar seleção</button>
+                <button
+                    class="pca-btn pca-btn-success"
+                    wire:click="saveSelected"
+                    wire:loading.attr="disabled"
+                    wire:target="saveSelected"
+                >
+                    <span wire:loading.remove wire:target="saveSelected">
+                        Salvar {{ count($selectedToSave) }} portfólio{{ count($selectedToSave) === 1 ? '' : 's' }}
+                    </span>
+                    <span wire:loading wire:target="saveSelected">Salvando...</span>
+                </button>
+            </div>
+        </div>
+    @endif
 
     {{-- ====================== CONFIGURATION ====================== --}}
     <div class="pca-card">
@@ -291,11 +349,11 @@
                 {{-- Analysis params column --}}
                 <div class="pca-analysis-params">
                     <div>
-                        <label class="pca-label">Máx. estratégias por portfólio</label>
+                        <label class="pca-label">Nº de estratégias por portfólio</label>
                         <input
                             class="pca-input"
                             type="number"
-                            wire:model.live="maxStrategies"
+                            wire:model.live="strategiesPerPortfolio"
                             min="2"
                             max="20"
                         >
@@ -361,7 +419,12 @@
                                 wire:model.live="selectedStrategyIds"
                                 value="{{ $strategy->id }}"
                             >
-                            <span class="pca-strategy-name">{{ $strategy->name }}</span>
+                            <span class="pca-strategy-name">
+                                @if ($strategy->is_favorite)
+                                    <span class="pca-favorite-star" title="Favorita">&starf;</span>
+                                @endif
+                                {{ $strategy->name }}
+                            </span>
                             <span class="pca-badge">{{ $assetOptions[$strategy->asset] ?? $strategy->asset }}</span>
                         </label>
                     @endforeach
@@ -382,8 +445,8 @@
                     <div class="pca-stat-label">Estratégias selecionadas</div>
                 </div>
                 <div class="pca-stat">
-                    <div class="pca-stat-value">{{ $maxStrategies }}</div>
-                    <div class="pca-stat-label">Máximo por portfólio</div>
+                    <div class="pca-stat-value">{{ $strategiesPerPortfolio }}</div>
+                    <div class="pca-stat-label">Estratégias por portfólio</div>
                 </div>
                 <div class="pca-stat">
                     <div class="pca-stat-value" style="{{ $exceedsLimit ? 'color:rgb(220 38 38)' : '' }}">
@@ -398,7 +461,7 @@
                     <strong>Limite excedido.</strong>
                     Essa seleção geraria {{ number_format($combinationsCount, 0, ',', '.') }} combinações,
                     acima do limite permitido de {{ number_format($maxCombinations, 0, ',', '.') }}.
-                    Reduza o número de estratégias selecionadas ou diminua o máximo de estratégias por portfólio.
+                    Reduza o número de estratégias selecionadas ou ajuste o número de estratégias por portfólio.
                 </div>
             @elseif ($combinationsCount > 0)
                 <div class="pca-alert pca-alert-info" style="margin-top:.875rem;">
@@ -406,7 +469,7 @@
                 </div>
             @elseif (count($selectedStrategyIds) > 0)
                 <div class="pca-alert pca-alert-warning" style="margin-top:.875rem;">
-                    Selecione ao menos 2 estratégias e defina o máximo ≥ 2 para gerar combinações.
+                    Selecione ao menos 2 estratégias e defina um número de estratégias por portfólio ≥ 2 para gerar combinações.
                 </div>
             @endif
 
@@ -444,19 +507,6 @@
                     </span>
                 </span>
                 <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-                    @if (count($selectedToSave) > 0)
-                        <button
-                            class="pca-btn pca-btn-success"
-                            wire:click="saveSelected"
-                            wire:loading.attr="disabled"
-                            wire:target="saveSelected"
-                        >
-                            <span wire:loading.remove wire:target="saveSelected">
-                                Salvar {{ count($selectedToSave) }} selecionado{{ count($selectedToSave) === 1 ? '' : 's' }}
-                            </span>
-                            <span wire:loading wire:target="saveSelected">Salvando...</span>
-                        </button>
-                    @endif
                     <button class="pca-btn-ghost" wire:click="selectAllResults">Selecionar todos</button>
                     <button class="pca-btn-ghost" wire:click="deselectAllResults">Limpar seleção</button>
                 </div>
@@ -492,7 +542,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @forelse ($sortedResults as $i => $result)
+                            @forelse ($paginatedResults as $i => $result)
                                 @php
                                     $hash = $result['combination_hash'];
                                     $names = (array) $result['strategy_names'];
@@ -511,11 +561,11 @@
                                         <input
                                             type="checkbox"
                                             style="width:1rem;height:1rem;accent-color:rgb(59 130 246);"
-                                            wire:model="selectedToSave"
+                                            wire:model.live="selectedToSave"
                                             value="{{ $hash }}"
                                         >
                                     </td>
-                                    <td class="pca-row-number">{{ $i + 1 }}</td>
+                                    <td class="pca-row-number">{{ ($currentPage - 1) * $resultsPerPage + $i + 1 }}</td>
                                     <td>
                                         <div class="pca-tag-list">
                                             @foreach ($displayNames as $n)
@@ -607,6 +657,31 @@
                         </tbody>
                     </table>
                 </div>
+
+                @if ($totalPages > 1)
+                    <div class="pca-pagination">
+                        <span class="pca-pagination-info">
+                            Página {{ $currentPage }} de {{ $totalPages }}
+                            <span style="color:rgb(156 163 175);">
+                                ({{ number_format(count($sortedResults), 0, ',', '.') }} combinações no total)
+                            </span>
+                        </span>
+                        <div class="pca-pagination-actions">
+                            <button
+                                class="pca-btn-ghost"
+                                wire:click="previousPage"
+                                wire:loading.attr="disabled"
+                                @if ($currentPage <= 1) disabled @endif
+                            >&larr; Anterior</button>
+                            <button
+                                class="pca-btn-ghost"
+                                wire:click="nextPage"
+                                wire:loading.attr="disabled"
+                                @if ($currentPage >= $totalPages) disabled @endif
+                            >Próxima &rarr;</button>
+                        </div>
+                    </div>
+                @endif
             </div>
         </div>
     @endif

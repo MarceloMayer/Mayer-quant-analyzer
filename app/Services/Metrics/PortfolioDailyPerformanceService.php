@@ -57,6 +57,7 @@ class PortfolioDailyPerformanceService
         $negativeDays = $rows->filter(fn (array $row): bool => (float) $row['net_profit'] < 0);
         $neutralDays = $rows->filter(fn (array $row): bool => (float) $row['net_profit'] === 0.0);
         $totalDays = $rows->count();
+        $streaks = $this->streaks($rows);
 
         return [
             'has_data' => $totalDays > 0,
@@ -80,7 +81,53 @@ class PortfolioDailyPerformanceService
             'negative_days_net_profit' => round((float) $negativeDays->sum('net_profit'), 2),
             'best_day' => $rows->sortByDesc('net_profit')->first(),
             'worst_day' => $rows->sortBy('net_profit')->first(),
+            'max_positive_streak' => $streaks['max_positive_streak'],
+            'max_negative_streak' => $streaks['max_negative_streak'],
+            'current_streak_type' => $streaks['current_streak_type'],
+            'current_streak_count' => $streaks['current_streak_count'],
             'rows' => $rows->sortByDesc('date')->values()->all(),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $rows  rows sorted ascending by date
+     * @return array{max_positive_streak: int, max_negative_streak: int, current_streak_type: string|null, current_streak_count: int}
+     */
+    private function streaks(Collection $rows): array
+    {
+        $maxPositiveStreak = 0;
+        $maxNegativeStreak = 0;
+        $currentPositiveStreak = 0;
+        $currentNegativeStreak = 0;
+
+        foreach ($rows as $row) {
+            if ($row['classification'] === 'positive') {
+                $currentPositiveStreak++;
+                $currentNegativeStreak = 0;
+            } elseif ($row['classification'] === 'negative') {
+                $currentNegativeStreak++;
+                $currentPositiveStreak = 0;
+            } else {
+                $currentPositiveStreak = 0;
+                $currentNegativeStreak = 0;
+            }
+
+            $maxPositiveStreak = max($maxPositiveStreak, $currentPositiveStreak);
+            $maxNegativeStreak = max($maxNegativeStreak, $currentNegativeStreak);
+        }
+
+        $lastClassification = $rows->last()['classification'] ?? null;
+        $currentStreakCount = match ($lastClassification) {
+            'positive' => $currentPositiveStreak,
+            'negative' => $currentNegativeStreak,
+            default => 0,
+        };
+
+        return [
+            'max_positive_streak' => $maxPositiveStreak,
+            'max_negative_streak' => $maxNegativeStreak,
+            'current_streak_type' => $currentStreakCount > 0 ? $lastClassification : null,
+            'current_streak_count' => $currentStreakCount,
         ];
     }
 

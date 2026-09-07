@@ -15,6 +15,7 @@ use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 
@@ -32,7 +33,7 @@ class PortfolioCombinationAnalyzer extends Page
     /** @var int[] */
     public array $selectedStrategyIds = [];
 
-    public int $maxStrategies = 3;
+    public int $strategiesPerPortfolio = 3;
 
     public float $initialBalance = 10000.0;
 
@@ -45,8 +46,11 @@ class PortfolioCombinationAnalyzer extends Page
     public string $nameSearch = '';
 
     // --- Analysis state ---
-    /** @var array<int, array<string, mixed>> */
-    public array $analysisResults = [];
+    // Full results are cached server-side (see analysisResultsCacheKey()) instead of held
+    // in a public property: with up to maxCombinations() rows, embedding them directly here
+    // would be re-serialized into the Livewire payload on every interaction (sorting, paging,
+    // selecting a checkbox) and quickly blow past Livewire's request payload size limit.
+    public int $resultsCount = 0;
 
     public bool $isAnalyzed = false;
 
@@ -59,6 +63,10 @@ class PortfolioCombinationAnalyzer extends Page
 
     public string $sortDirection = 'desc';
 
+    public int $resultsPerPage = 25;
+
+    public int $currentPage = 1;
+
     // --- Computed ---
 
     #[Computed]
@@ -68,8 +76,9 @@ class PortfolioCombinationAnalyzer extends Page
             ->where('user_id', auth()->id())
             ->when($this->assetFilter !== '', fn ($q) => $q->where('asset', $this->assetFilter))
             ->when($this->nameSearch !== '', fn ($q) => $q->where('name', 'like', "%{$this->nameSearch}%"))
+            ->orderByDesc('is_favorite')
             ->orderBy('name')
-            ->get(['id', 'name', 'asset']);
+            ->get(['id', 'name', 'asset', 'is_favorite']);
     }
 
     #[Computed]
@@ -77,7 +86,7 @@ class PortfolioCombinationAnalyzer extends Page
     {
         return app(PortfolioCombinationGeneratorService::class)->countCombinations(
             count($this->selectedStrategyIds),
-            $this->maxStrategies,
+            $this->strategiesPerPortfolio,
         );
     }
 
@@ -96,11 +105,11 @@ class PortfolioCombinationAnalyzer extends Page
     #[Computed]
     public function sortedResults(): array
     {
-        if (empty($this->analysisResults)) {
+        $results = $this->getAnalysisResults();
+
+        if (empty($results)) {
             return [];
         }
-
-        $results = $this->analysisResults;
 
         usort($results, function (array $a, array $b): int {
             $valA = (float) ($a[$this->sortColumn] ?? 0);
@@ -115,6 +124,20 @@ class PortfolioCombinationAnalyzer extends Page
         });
 
         return $results;
+    }
+
+    #[Computed]
+    public function totalPages(): int
+    {
+        return (int) max(1, ceil(count($this->sortedResults) / $this->resultsPerPage));
+    }
+
+    #[Computed]
+    public function paginatedResults(): array
+    {
+        $offset = ($this->currentPage - 1) * $this->resultsPerPage;
+
+        return array_slice($this->sortedResults, $offset, $this->resultsPerPage);
     }
 
     // --- Page content ---
@@ -135,7 +158,7 @@ class PortfolioCombinationAnalyzer extends Page
         return [
             'availableStrategies' => $this->availableStrategies,
             'selectedStrategyIds' => $this->selectedStrategyIds,
-            'maxStrategies' => $this->maxStrategies,
+            'strategiesPerPortfolio' => $this->strategiesPerPortfolio,
             'initialBalance' => $this->initialBalance,
             'startDate' => $this->startDate,
             'endDate' => $this->endDate,
@@ -146,6 +169,10 @@ class PortfolioCombinationAnalyzer extends Page
             'exceedsLimit' => $this->exceedsLimit,
             'isAnalyzed' => $this->isAnalyzed,
             'sortedResults' => $this->sortedResults,
+            'paginatedResults' => $this->paginatedResults,
+            'currentPage' => $this->currentPage,
+            'totalPages' => $this->totalPages,
+            'resultsPerPage' => $this->resultsPerPage,
             'selectedToSave' => $this->selectedToSave,
             'errorMessage' => $this->errorMessage,
             'sortColumn' => $this->sortColumn,
@@ -161,7 +188,7 @@ class PortfolioCombinationAnalyzer extends Page
         $this->resetAnalysis();
     }
 
-    public function updatedMaxStrategies(): void
+    public function updatedStrategiesPerPortfolio(): void
     {
         $this->resetAnalysis();
     }
@@ -187,7 +214,7 @@ class PortfolioCombinationAnalyzer extends Page
 
     public function selectAllResults(): void
     {
-        $this->selectedToSave = array_column($this->analysisResults, 'combination_hash');
+        $this->selectedToSave = array_column($this->getAnalysisResults(), 'combination_hash');
     }
 
     public function deselectAllResults(): void
@@ -203,14 +230,32 @@ class PortfolioCombinationAnalyzer extends Page
             $this->sortColumn = $column;
             $this->sortDirection = 'desc';
         }
+
+        $this->currentPage = 1;
+    }
+
+    public function goToPage(int $page): void
+    {
+        $this->currentPage = max(1, min($page, $this->totalPages));
+    }
+
+    public function nextPage(): void
+    {
+        $this->goToPage($this->currentPage + 1);
+    }
+
+    public function previousPage(): void
+    {
+        $this->goToPage($this->currentPage - 1);
     }
 
     public function analyze(): void
     {
         $this->errorMessage = null;
-        $this->analysisResults = [];
+        $this->setAnalysisResults([]);
         $this->isAnalyzed = false;
         $this->selectedToSave = [];
+        $this->currentPage = 1;
 
         $this->selectedStrategyIds = collect($this->selectedStrategyIds)
             ->map(fn (mixed $strategyId): int => (int) $strategyId)
@@ -236,8 +281,14 @@ class PortfolioCombinationAnalyzer extends Page
             return;
         }
 
-        if ($this->maxStrategies < 2) {
-            $this->errorMessage = 'O máximo de estratégias por portfólio deve ser ao menos 2.';
+        if ($this->strategiesPerPortfolio < 2) {
+            $this->errorMessage = 'O número de estratégias por portfólio deve ser ao menos 2.';
+
+            return;
+        }
+
+        if ($this->strategiesPerPortfolio > count($this->selectedStrategyIds)) {
+            $this->errorMessage = 'O número de estratégias por portfólio não pode ser maior que a quantidade de estratégias selecionadas.';
 
             return;
         }
@@ -253,28 +304,33 @@ class PortfolioCombinationAnalyzer extends Page
         $limit = $this->maxCombinations;
 
         if ($count > $limit) {
-            $this->errorMessage = "Essa seleção geraria {$count} combinações, acima do limite permitido de {$limit}. Reduza o número de estratégias selecionadas ou diminua o máximo de estratégias por portfólio.";
+            $this->errorMessage = "Essa seleção geraria {$count} combinações, acima do limite permitido de {$limit}. Reduza o número de estratégias selecionadas ou ajuste o número de estratégias por portfólio.";
 
             return;
         }
 
+        // Large combination counts (now permitted up to maxCombinations) can take longer
+        // than the default PHP request timeout to score; lift it for this action only.
+        set_time_limit(300);
+
         $generator = app(PortfolioCombinationGeneratorService::class);
         $analyzer = app(PortfolioCombinationAnalyzerService::class);
 
-        $combinations = $generator->generate($this->selectedStrategyIds, $this->maxStrategies);
+        $combinations = $generator->generate($this->selectedStrategyIds, $this->strategiesPerPortfolio);
 
-        $this->analysisResults = $analyzer->analyze($combinations, [
+        $results = $analyzer->analyze($combinations, [
             'initial_balance' => $this->initialBalance,
             'start_date' => $this->startDate,
             'end_date' => $this->endDate,
         ]);
 
+        $this->setAnalysisResults($results);
         $this->isAnalyzed = true;
     }
 
     public function saveSingle(string $hash): void
     {
-        $result = collect($this->analysisResults)->firstWhere('combination_hash', $hash);
+        $result = collect($this->getAnalysisResults())->firstWhere('combination_hash', $hash);
 
         if ($result === null) {
             return;
@@ -297,7 +353,7 @@ class PortfolioCombinationAnalyzer extends Page
 
     public function viewResults(string $hash): void
     {
-        $result = collect($this->analysisResults)->firstWhere('combination_hash', $hash);
+        $result = collect($this->getAnalysisResults())->firstWhere('combination_hash', $hash);
 
         if ($result === null) {
             return;
@@ -331,9 +387,10 @@ class PortfolioCombinationAnalyzer extends Page
 
         $savedCount = 0;
         $skippedCount = 0;
+        $resultsByHash = collect($this->getAnalysisResults())->keyBy('combination_hash');
 
         foreach ($this->selectedToSave as $hash) {
-            $result = collect($this->analysisResults)->firstWhere('combination_hash', $hash);
+            $result = $resultsByHash->get($hash);
 
             if ($result === null) {
                 continue;
@@ -448,9 +505,43 @@ class PortfolioCombinationAnalyzer extends Page
 
     private function resetAnalysis(): void
     {
-        $this->analysisResults = [];
+        $this->setAnalysisResults([]);
         $this->isAnalyzed = false;
         $this->selectedToSave = [];
         $this->errorMessage = null;
+        $this->currentPage = 1;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function getAnalysisResults(): array
+    {
+        return Cache::get($this->analysisResultsCacheKey(), []);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $results
+     */
+    private function setAnalysisResults(array $results): void
+    {
+        $this->resultsCount = count($results);
+
+        if (empty($results)) {
+            Cache::forget($this->analysisResultsCacheKey());
+
+            return;
+        }
+
+        Cache::put($this->analysisResultsCacheKey(), $results, now()->addHour());
+    }
+
+    /**
+     * Scoped to the current user and this specific component instance, so results from one
+     * analysis don't leak into another tab/session while this page is open.
+     */
+    private function analysisResultsCacheKey(): string
+    {
+        return 'portfolio_combo_results:'.auth()->id().':'.$this->getId();
     }
 }

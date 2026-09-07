@@ -53,9 +53,30 @@ class PortfolioCombinationAnalyzerService
             $query->whereDate('exit_time', '<=', $endDate);
         }
 
+        // Trade models cast `exit_time` to Carbon on every access (Eloquent does not
+        // cache casted date attributes), and this data gets re-sorted once per
+        // combination. Pre-computing the timestamp/formatted values here means each
+        // trade's date is parsed exactly once, no matter how many combinations reuse it.
+        // Kept as plain arrays (not Collections) beyond this point: calculateCombinationMetrics()
+        // runs once per combination (up to thousands per analysis), and Collection method-call
+        // overhead on the merge+sort in that hot path measurably slows down large analyses.
         $tradesByStrategy = $query
             ->get(['id', 'strategy_id', 'exit_time', 'net_profit'])
-            ->groupBy('strategy_id');
+            ->map(function (Trade $trade): array {
+                $exitTime = $trade->exit_time;
+
+                return [
+                    'id' => $trade->id,
+                    'strategy_id' => $trade->strategy_id,
+                    'timestamp' => $exitTime?->getTimestamp() ?? 0,
+                    'date' => $exitTime?->format('Y-m-d H:i:s'),
+                    'month_key' => $exitTime?->format('Y-m'),
+                    'net_profit' => (float) $trade->net_profit,
+                ];
+            })
+            ->groupBy('strategy_id')
+            ->map(fn (Collection $trades): array => $trades->values()->all())
+            ->all();
 
         $rawResults = [];
 
@@ -73,13 +94,13 @@ class PortfolioCombinationAnalyzerService
 
     /**
      * @param  int[]  $combination
-     * @param  Collection<int, Collection<int, Trade>>  $tradesByStrategy
+     * @param  array<int, array<int, array<string, mixed>>>  $tradesByStrategy
      * @param  Collection<int, Strategy>  $strategies
      * @return array<string, mixed>
      */
     private function calculateCombinationMetrics(
         array $combination,
-        Collection $tradesByStrategy,
+        array $tradesByStrategy,
         Collection $strategies,
         float $initialBalance,
     ): array {
@@ -90,28 +111,25 @@ class PortfolioCombinationAnalyzerService
             $combination,
         );
 
-        // Merge all trades for the combination strategies
-        $mergedTrades = collect();
+        // Merge all trades for the combination strategies (plain arrays: see note above)
+        $sortedTrades = [];
         foreach ($combination as $strategyId) {
-            $strategyTrades = $tradesByStrategy->get($strategyId);
-            if ($strategyTrades !== null) {
-                $mergedTrades = $mergedTrades->merge($strategyTrades);
+            foreach ($tradesByStrategy[$strategyId] ?? [] as $trade) {
+                $sortedTrades[] = $trade;
             }
         }
 
-        // Sort combined trades by exit_time then id
-        $sortedTrades = $mergedTrades
-            ->sortBy([
-                fn ($a, $b) => $a->exit_time?->getTimestamp() <=> $b->exit_time?->getTimestamp(),
-                fn ($a, $b) => $a->id <=> $b->id,
-            ])
-            ->values();
-
-        $totalTrades = $sortedTrades->count();
+        $totalTrades = count($sortedTrades);
 
         if ($totalTrades === 0) {
             return $this->emptyResult($hash, $combination, $strategyNames, $initialBalance);
         }
+
+        // Sort combined trades by exit_time then id
+        usort(
+            $sortedTrades,
+            fn (array $a, array $b): int => $a['timestamp'] <=> $b['timestamp'] ?: $a['id'] <=> $b['id'],
+        );
 
         // Build equity curve starting from initialBalance
         $equity = $initialBalance;
@@ -123,20 +141,19 @@ class PortfolioCombinationAnalyzerService
         $monthlyProfitsMap = [];
 
         foreach ($sortedTrades as $trade) {
-            $netProfit = (float) $trade->net_profit;
+            $netProfit = $trade['net_profit'];
             $equity += $netProfit;
             $profits[] = $netProfit;
 
             $equityCurve[] = [
-                'date' => $trade->exit_time?->format('Y-m-d H:i:s'),
+                'date' => $trade['date'],
                 'equity' => round($equity, 2),
                 'net_profit' => round($netProfit, 2),
                 'value' => round($equity, 2),
             ];
 
-            $exitTime = $trade->exit_time;
-            if ($exitTime !== null) {
-                $key = $exitTime->format('Y-m');
+            $key = $trade['month_key'];
+            if ($key !== null) {
                 $monthlyProfitsMap[$key] = ($monthlyProfitsMap[$key] ?? 0.0) + $netProfit;
             }
         }
@@ -183,8 +200,6 @@ class PortfolioCombinationAnalyzerService
             'equity_r2' => $consistency['equity_r2'],
             'net_profit_to_drawdown' => $consistency['net_profit_to_drawdown'],
             'consistency_score' => 0.0, // set by applyConsistencyScores()
-            'monthly_results' => $monthlyProfitsMap,
-            'equity_curve' => $equityCurve,
             'initial_balance' => $initialBalance,
         ];
     }
@@ -219,8 +234,6 @@ class PortfolioCombinationAnalyzerService
             'equity_r2' => 0.0,
             'net_profit_to_drawdown' => 0.0,
             'consistency_score' => 0.0,
-            'monthly_results' => [],
-            'equity_curve' => [],
             'initial_balance' => $initialBalance,
         ];
     }

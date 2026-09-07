@@ -8,7 +8,8 @@ use Filament\Support\Enums\Alignment;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget;
-use Illuminate\Support\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 
 class PortfolioConsolidatedTradesTable extends TableWidget
 {
@@ -17,16 +18,26 @@ class PortfolioConsolidatedTradesTable extends TableWidget
     protected int|string|array $columnSpan = 'full';
 
     /**
-     * @var array<int, array<string, mixed>>
+     * The trades are cached server-side (see tradesCacheKey()) instead of held in a public
+     * property: with portfolios that accumulate thousands of closed trades, embedding them
+     * directly here would be re-serialized into the Livewire payload on every sort/page
+     * interaction, making the page heavy to load and slow to paginate.
+     *
+     * @param  array<int, array<string, mixed>>  $trades
      */
-    public array $trades = [];
+    public function mount(array $trades = []): void
+    {
+        Cache::put($this->tradesCacheKey(), $trades, now()->addHour());
+    }
 
     public function table(Table $table): Table
     {
         return $table
             ->heading('Trades consolidados')
             ->description('Trades fechados das estratégias ativas, já ponderados pelo peso do portfólio.')
-            ->records(fn (?string $sortColumn, ?string $sortDirection): Collection => $this->records($sortColumn, $sortDirection))
+            ->records(
+                fn (?string $sortColumn, ?string $sortDirection, int $page, int $recordsPerPage): LengthAwarePaginator => $this->records($sortColumn, $sortDirection, $page, $recordsPerPage)
+            )
             ->columns([
                 TextColumn::make('exit_time')
                     ->label('Saída')
@@ -81,13 +92,9 @@ class PortfolioConsolidatedTradesTable extends TableWidget
             ->defaultPaginationPageOption(10);
     }
 
-    private function records(?string $sortColumn, ?string $sortDirection): Collection
+    private function records(?string $sortColumn, ?string $sortDirection, int $page, int $recordsPerPage): LengthAwarePaginator
     {
-        $records = collect($this->trades)
-            ->values()
-            ->mapWithKeys(fn (array $trade, int $index): array => [
-                (string) ($trade['id'] ?? $index) => $trade,
-            ]);
+        $records = collect(Cache::get($this->tradesCacheKey(), []))->values();
 
         if (filled($sortColumn)) {
             $records = $records->sortBy(
@@ -97,7 +104,29 @@ class PortfolioConsolidatedTradesTable extends TableWidget
             );
         }
 
-        return $records;
+        $records = $records->values();
+
+        $items = $records
+            ->forPage($page, $recordsPerPage)
+            ->mapWithKeys(fn (array $trade, int $index): array => [
+                (string) ($trade['id'] ?? $index) => $trade,
+            ]);
+
+        return new LengthAwarePaginator(
+            $items,
+            $records->count(),
+            $recordsPerPage,
+            $page,
+        );
+    }
+
+    /**
+     * Scoped to the current user and this specific widget instance, so trades from one
+     * portfolio page don't leak into another tab/session while it's open.
+     */
+    private function tradesCacheKey(): string
+    {
+        return 'portfolio_consolidated_trades:'.auth()->id().':'.$this->getId();
     }
 
     private function formatDateTime(mixed $value): string

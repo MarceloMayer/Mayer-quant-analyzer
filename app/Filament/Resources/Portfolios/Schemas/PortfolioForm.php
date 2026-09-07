@@ -44,7 +44,10 @@ class PortfolioForm
                             ->relationship(
                                 'strategy',
                                 'name',
-                                fn (Builder $query): Builder => $query->where('user_id', auth()->id()),
+                                fn (Builder $query): Builder => $query
+                                    ->where('user_id', auth()->id())
+                                    ->orderByDesc('is_favorite')
+                                    ->orderBy('name'),
                             )
                             ->getOptionLabelFromRecordUsing(fn (Strategy $record): string => self::strategyOptionLabel($record))
                             ->disableOptionsWhenSelectedInSiblingRepeaterItems()
@@ -77,7 +80,8 @@ class PortfolioForm
     private static function strategyOptionLabel(Strategy $strategy): string
     {
         $asset = Strategy::assetOptions()[$strategy->asset] ?? $strategy->asset;
+        $star = $strategy->is_favorite ? '★ ' : '';
 
-        return "{$strategy->name} ({$asset}) — Magic: {$strategy->magic_number}";
+        return "{$star}{$strategy->name} ({$asset}) — Magic: {$strategy->magic_number}";
     }
 }

@@ -71,8 +71,9 @@ class StrategyComparison extends Page
         return Strategy::query()
             ->where('user_id', auth()->id())
             ->when($this->assetFilter !== '', fn ($query) => $query->where('asset', $this->assetFilter))
+            ->orderByDesc('is_favorite')
             ->orderBy('name')
-            ->get(['id', 'name', 'asset']);
+            ->get(['id', 'name', 'asset', 'is_favorite']);
     }
 
     /**
@@ -194,6 +195,14 @@ class StrategyComparison extends Page
         ]);
 
         $this->isCompared = true;
+    }
+
+    public function useFullHistory(): void
+    {
+        $this->startDate = null;
+        $this->endDate = null;
+
+        $this->compare();
     }
 
     public function swapStrategies(): void

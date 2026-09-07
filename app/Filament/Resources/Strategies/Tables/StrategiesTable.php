@@ -12,9 +12,12 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Component;
 
@@ -23,7 +26,23 @@ class StrategiesTable
     public static function configure(Table $table): Table
     {
         return $table
+            ->defaultSort(fn (Builder $query): Builder => $query->orderByDesc('is_favorite')->orderBy('name'))
             ->columns([
+                IconColumn::make('is_favorite')
+                    ->label('Favorito')
+                    ->boolean()
+                    ->trueIcon(Heroicon::Star)
+                    ->falseIcon(Heroicon::OutlinedStar)
+                    ->trueColor('warning')
+                    ->falseColor('gray')
+                    ->alignCenter()
+                    ->sortable()
+                    ->tooltip(fn (Strategy $record): string => $record->is_favorite
+                        ? 'Remover dos favoritos'
+                        : 'Marcar como favorita')
+                    ->action(function (Strategy $record): void {
+                        $record->update(['is_favorite' => ! $record->is_favorite]);
+                    }),
                 TextColumn::make('name')
                     ->label('Nome')
                     ->searchable()
@@ -46,6 +65,10 @@ class StrategiesTable
                 SelectFilter::make('asset')
                     ->label('Ativo')
                     ->options(Strategy::assetOptions()),
+                Filter::make('is_favorite')
+                    ->label('Somente favoritas')
+                    ->query(fn (Builder $query): Builder => $query->where('is_favorite', true))
+                    ->toggle(),
             ])
             ->recordActions([
                 EditAction::make(),

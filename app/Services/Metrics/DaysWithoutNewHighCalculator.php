@@ -30,7 +30,7 @@ class DaysWithoutNewHighCalculator
                 continue;
             }
 
-            $days = (int) floor(abs($date->getTimestamp() - $lastHighDate->getTimestamp()) / 86400);
+            $days = (int) $lastHighDate->startOfDay()->diffInDays($date->startOfDay());
             $maxDaysWithoutNewHigh = max($maxDaysWithoutNewHigh, $days);
         }
 

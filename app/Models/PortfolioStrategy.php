@@ -6,6 +6,8 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Cache;
+use App\Services\Metrics\PortfolioCorrelationService;
 
 #[Fillable([
     'portfolio_id',
@@ -27,6 +29,28 @@ class PortfolioStrategy extends Model
                 throw new AuthorizationException('A estratégia selecionada não pertence a este portfólio.');
             }
         });
+
+        static::saved(fn (self $portfolioStrategy) => self::bustPortfolioMetricsCache($portfolioStrategy->portfolio_id));
+        static::deleted(fn (self $portfolioStrategy) => self::bustPortfolioMetricsCache($portfolioStrategy->portfolio_id));
+    }
+
+    /**
+     * PortfolioResultsPage caches the (expensive) portfolio metrics and correlation matrix
+     * keyed by portfolio id / period / metric. Weight or enabled-flag changes made through the
+     * portfolio edit form must invalidate that cache immediately, otherwise the results page
+     * would keep showing stale numbers until the TTL expires.
+     */
+    private static function bustPortfolioMetricsCache(int $portfolioId): void
+    {
+        Cache::forget('portfolio_metrics:'.$portfolioId);
+
+        $correlationService = app(PortfolioCorrelationService::class);
+
+        foreach (array_keys($correlationService->periodOptions()) as $period) {
+            foreach (array_keys($correlationService->metricOptions()) as $metric) {
+                Cache::forget("portfolio_correlation:{$portfolioId}:{$period}:{$metric}");
+            }
+        }
     }
 
     public function portfolio(): BelongsTo

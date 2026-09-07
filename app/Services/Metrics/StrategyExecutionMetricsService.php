@@ -799,7 +799,7 @@ class StrategyExecutionMetricsService
             }
 
             if ($lastHighDate !== null) {
-                $maxDays = max($maxDays, (int) $lastHighDate->diffInDays($date));
+                $maxDays = max($maxDays, (int) $lastHighDate->startOfDay()->diffInDays($date->startOfDay()));
             }
         }
 

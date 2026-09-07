@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'name', 'magic_number', 'asset'])]
+#[Fillable(['user_id', 'name', 'magic_number', 'asset', 'is_favorite'])]
 class Strategy extends Model
 {
     public const ASSET_MINI_INDICE = 'mini_indice';
@@ -23,6 +23,13 @@ class Strategy extends Model
         return [
             self::ASSET_MINI_INDICE => 'Mini-Índice',
             self::ASSET_MINI_DOLAR => 'Mini-Dólar',
+        ];
+    }
+
+    protected function casts(): array
+    {
+        return [
+            'is_favorite' => 'boolean',
         ];
     }
 

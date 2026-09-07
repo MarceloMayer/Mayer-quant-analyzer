@@ -14,6 +14,7 @@ class StrategyMetricsService
         private readonly DaysWithoutNewHighCalculator $daysWithoutNewHighCalculator,
         private readonly MonthlyPerformanceService $monthlyPerformanceService,
         private readonly StreakCalculator $streakCalculator,
+        private readonly InitialCapitalResolver $initialCapitalResolver,
     ) {}
 
     /**
@@ -27,8 +28,9 @@ class StrategyMetricsService
             ->orderBy('id')
             ->get();
 
+        $initialCapital = $this->initialCapitalResolver->resolve($strategy);
         $equityCurve = $this->equityCurveService->calculate($trades);
-        $drawdown = $this->drawdownCalculator->calculate($equityCurve);
+        $drawdown = $this->drawdownCalculator->calculate($equityCurve, $initialCapital);
         $streaks = $this->streakCalculator->calculate($trades);
         $monthlyPerformance = $this->monthlyPerformanceService->calculate($trades);
         $monthlyCumulativePerformance = $this->monthlyPerformanceService->calculateCumulative($trades);
@@ -69,7 +71,7 @@ class StrategyMetricsService
             'drawdown_peak' => $drawdown['peak'],
             'drawdown_valley' => $drawdown['valley'],
             'equity_curve' => $equityCurve,
-            'drawdown_curve' => $this->drawdownCurve($equityCurve),
+            'drawdown_curve' => $this->drawdownCurve($equityCurve, $initialCapital),
             'monthly_performance' => $monthlyPerformance,
             'monthly_cumulative_performance' => $monthlyCumulativePerformance,
             'monthly_table' => $this->monthlyTable($monthlyPerformance, $trades),
@@ -82,13 +84,13 @@ class StrategyMetricsService
      * @param  array<int, array<string, mixed>>  $equityCurve
      * @return array<int, array{date: string|null, label: string, value: float, percent: float}>
      */
-    private function drawdownCurve(array $equityCurve): array
+    private function drawdownCurve(array $equityCurve, float $initialBalance = 0.0): array
     {
-        $peak = 0.0;
+        $peak = $initialBalance;
 
         return collect($equityCurve)
-            ->map(function (array $point) use (&$peak): array {
-                $equity = (float) ($point['equity'] ?? 0);
+            ->map(function (array $point) use (&$peak, $initialBalance): array {
+                $equity = $initialBalance + (float) ($point['equity'] ?? 0);
                 $peak = max($peak, $equity);
                 $drawdown = $equity - $peak;
                 $drawdownPercent = $peak > 0 ? ($drawdown / $peak) * 100 : 0.0;

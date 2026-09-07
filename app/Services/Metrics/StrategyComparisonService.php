@@ -50,6 +50,7 @@ class StrategyComparisonService
         private readonly StreakCalculator $streakCalculator,
         private readonly UlcerIndexCalculator $ulcerIndexCalculator,
         private readonly LinearRegressionService $linearRegressionService,
+        private readonly InitialCapitalResolver $initialCapitalResolver,
     ) {}
 
     /**
@@ -79,9 +80,12 @@ class StrategyComparisonService
         $firstTrades = $this->trades($first, $options['first_backtest_id'] ?? null, $startDate, $endDate);
         $secondTrades = $this->trades($second, $options['second_backtest_id'] ?? null, $startDate, $endDate);
 
-        $firstMetrics = $this->metrics($firstTrades);
-        $secondMetrics = $this->metrics($secondTrades);
-        $combinedMetrics = $this->metrics($firstTrades->merge($secondTrades));
+        $firstCapital = $this->initialCapitalResolver->resolve($first, $options['first_backtest_id'] ?? null);
+        $secondCapital = $this->initialCapitalResolver->resolve($second, $options['second_backtest_id'] ?? null);
+
+        $firstMetrics = $this->metrics($firstTrades, $firstCapital);
+        $secondMetrics = $this->metrics($secondTrades, $secondCapital);
+        $combinedMetrics = $this->metrics($firstTrades->merge($secondTrades), $firstCapital + $secondCapital);
 
         $rows = $this->rows($firstMetrics, $secondMetrics);
         $score = $this->score($rows);
@@ -193,7 +197,7 @@ class StrategyComparisonService
      * @param  Collection<int, Trade>  $trades
      * @return array<string, mixed>
      */
-    private function metrics(Collection $trades): array
+    private function metrics(Collection $trades, float $initialBalance = 0.0): array
     {
         $trades = $trades
             ->sort(fn (Trade $first, Trade $second): int => [
@@ -206,7 +210,7 @@ class StrategyComparisonService
             ->values();
 
         $equityCurve = $this->equityCurveService->calculate($trades);
-        $drawdown = $this->drawdownCalculator->calculate($equityCurve);
+        $drawdown = $this->drawdownCalculator->calculate($equityCurve, $initialBalance);
         $streaks = $this->streakCalculator->calculate($trades);
         $monthlyPerformance = $this->monthlyPerformanceService->calculate($trades);
         $daysWithoutNewHigh = $this->daysWithoutNewHighCalculator->calculate($equityCurve);
@@ -258,7 +262,7 @@ class StrategyComparisonService
             'average_monthly_profit' => $monthsWithTrades > 0
                 ? round($netProfit / $monthsWithTrades, 2)
                 : 0.0,
-            'ulcer_index' => $this->ulcerIndexCalculator->calculate($equityCurve),
+            'ulcer_index' => $this->ulcerIndexCalculator->calculate($equityCurve, $initialBalance),
             'equity_r2' => $this->linearRegressionService->calculateR2(
                 array_map(fn (array $point): float => (float) $point['equity'], $equityCurve),
             ),
