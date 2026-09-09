@@ -4,15 +4,21 @@ namespace App\Filament\Resources\Portfolios\Pages;
 
 use App\Filament\Resources\Portfolios\PortfolioResource;
 use App\Models\Portfolio;
+use App\Models\PortfolioStrategy;
 use App\Services\Metrics\PortfolioAnalyzerService;
 use App\Services\Metrics\PortfolioCorrelationService;
+use App\Services\Portfolio\PortfolioWeightOptimizerService;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
-use Filament\Support\Icons\Heroicon;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class PortfolioResultsPage extends ViewRecord
 {
@@ -30,6 +36,14 @@ class PortfolioResultsPage extends ViewRecord
 
     public int $dailyPage = 1;
 
+    /**
+     * Result of the last weight-optimizer run, rendered as an in-page suggestion panel
+     * until the user applies or discards it.
+     *
+     * @var array<string, mixed>
+     */
+    public array $weightSuggestion = [];
+
     public function content(Schema $schema): Schema
     {
         return $schema
@@ -43,6 +57,7 @@ class PortfolioResultsPage extends ViewRecord
                             'metrics' => $metrics,
                             'dailyTable' => $this->dailyTable($metrics['daily_performance'] ?? []),
                             'correlation' => $this->correlation(),
+                            'weightSuggestion' => $this->weightSuggestion,
                         ];
                     }),
             ]);
@@ -134,8 +149,105 @@ class PortfolioResultsPage extends ViewRecord
                 ->icon(Heroicon::OutlinedArrowLeft)
                 ->url(PortfolioResource::getUrl('index'))
                 ->color('gray'),
+            Action::make('optimizeWeights')
+                ->label('Otimizar pesos')
+                ->icon(Heroicon::OutlinedAdjustmentsHorizontal)
+                ->color('gray')
+                ->modalHeading('Otimizar pesos das estratégias')
+                ->modalDescription('O sistema busca pesos que melhoram a métrica escolhida, mantendo todas as estratégias ativas na composição. Nada é alterado até você aplicar.')
+                ->modalSubmitActionLabel('Gerar sugestão')
+                ->schema([
+                    Select::make('objective')
+                        ->label('Objetivo')
+                        ->options(PortfolioWeightOptimizerService::objectiveOptions())
+                        ->default(PortfolioWeightOptimizerService::OBJECTIVE_ULCER)
+                        ->native(false)
+                        ->required(),
+                    TextInput::make('min_weight')
+                        ->label('Peso mínimo por estratégia')
+                        ->helperText('Use 0 para permitir que uma estratégia seja praticamente desativada.')
+                        ->numeric()
+                        ->minValue(0)
+                        ->default(0.5),
+                    TextInput::make('max_weight')
+                        ->label('Peso máximo por estratégia')
+                        ->numeric()
+                        ->minValue(0.5)
+                        ->default(3),
+                ])
+                ->action(function (array $data): void {
+                    $this->runWeightOptimization($data);
+                }),
             EditAction::make(),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function runWeightOptimization(array $data): void
+    {
+        $result = app(PortfolioWeightOptimizerService::class)->optimize(
+            $this->portfolio(),
+            (string) ($data['objective'] ?? PortfolioWeightOptimizerService::OBJECTIVE_ULCER),
+            [
+                'min' => (float) ($data['min_weight'] ?? 0.5),
+                'max' => (float) ($data['max_weight'] ?? 3),
+            ],
+        );
+
+        if (($result['ok'] ?? false) !== true) {
+            $this->weightSuggestion = [];
+
+            Notification::make()
+                ->title($result['message'] ?? 'Não foi possível otimizar os pesos.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $this->weightSuggestion = $result;
+
+        Notification::make()
+            ->title($result['changed']
+                ? 'Sugestão de pesos pronta. Revise abaixo antes de aplicar.'
+                : 'Os pesos atuais já são os melhores para esse objetivo.')
+            ->success()
+            ->send();
+    }
+
+    public function applyWeights(): void
+    {
+        $strategies = $this->weightSuggestion['strategies'] ?? [];
+
+        if ($strategies === []) {
+            return;
+        }
+
+        DB::transaction(function () use ($strategies): void {
+            foreach ($strategies as $strategy) {
+                PortfolioStrategy::query()
+                    ->where('portfolio_id', $this->portfolio()->getKey())
+                    ->where('strategy_id', (int) $strategy['strategy_id'])
+                    ->each(function (PortfolioStrategy $portfolioStrategy) use ($strategy): void {
+                        $portfolioStrategy->weight = (float) $strategy['suggested_weight'];
+                        $portfolioStrategy->save();
+                    });
+            }
+        });
+
+        $this->weightSuggestion = [];
+
+        Notification::make()
+            ->title('Pesos atualizados. As métricas foram recalculadas.')
+            ->success()
+            ->send();
+    }
+
+    public function discardWeightSuggestion(): void
+    {
+        $this->weightSuggestion = [];
     }
 
     private function portfolio(): Portfolio

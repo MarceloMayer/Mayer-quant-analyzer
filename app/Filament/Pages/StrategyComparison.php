@@ -37,10 +37,6 @@ class StrategyComparison extends Page
 
     public string $secondBacktestId = StrategyComparisonService::ALL_EXECUTIONS;
 
-    public ?string $startDate = null;
-
-    public ?string $endDate = null;
-
     public string $correlationPeriod = StrategyComparisonService::PERIOD_MONTHLY;
 
     public string $assetFilter = '';
@@ -140,16 +136,6 @@ class StrategyComparison extends Page
         $this->resetComparison();
     }
 
-    public function updatedStartDate(): void
-    {
-        $this->resetComparison();
-    }
-
-    public function updatedEndDate(): void
-    {
-        $this->resetComparison();
-    }
-
     public function updatedCorrelationPeriod(): void
     {
         if ($this->isCompared) {
@@ -180,29 +166,13 @@ class StrategyComparison extends Page
             return;
         }
 
-        if ($this->startDate !== null && $this->endDate !== null && $this->startDate > $this->endDate) {
-            $this->errorMessage = 'A data inicial não pode ser maior que a data final.';
-
-            return;
-        }
-
         $this->comparison = app(StrategyComparisonService::class)->compare($first, $second, [
             'first_backtest_id' => $this->firstBacktestId,
             'second_backtest_id' => $this->secondBacktestId,
-            'start_date' => $this->startDate,
-            'end_date' => $this->endDate,
             'correlation_period' => $this->correlationPeriod,
         ]);
 
         $this->isCompared = true;
-    }
-
-    public function useFullHistory(): void
-    {
-        $this->startDate = null;
-        $this->endDate = null;
-
-        $this->compare();
     }
 
     public function swapStrategies(): void
@@ -223,8 +193,6 @@ class StrategyComparison extends Page
         $this->secondStrategyId = '';
         $this->firstBacktestId = StrategyComparisonService::ALL_EXECUTIONS;
         $this->secondBacktestId = StrategyComparisonService::ALL_EXECUTIONS;
-        $this->startDate = null;
-        $this->endDate = null;
 
         $this->resetComparison();
     }

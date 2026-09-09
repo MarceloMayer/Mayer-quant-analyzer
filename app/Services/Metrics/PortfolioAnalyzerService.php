@@ -5,6 +5,8 @@ namespace App\Services\Metrics;
 use App\Models\Portfolio;
 use App\Models\PortfolioStrategy;
 use App\Models\Trade;
+use App\Services\Portfolio\LinearRegressionService;
+use App\Services\Portfolio\UlcerIndexCalculator;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -18,6 +20,8 @@ class PortfolioAnalyzerService
         private readonly MonthlyPerformanceService $monthlyPerformanceService,
         private readonly StreakCalculator $streakCalculator,
         private readonly PortfolioDailyPerformanceService $dailyPerformanceService,
+        private readonly UlcerIndexCalculator $ulcerIndexCalculator,
+        private readonly LinearRegressionService $linearRegressionService,
     ) {}
 
     /**
@@ -59,6 +63,24 @@ class PortfolioAnalyzerService
         $averageWin = $winningTrades->isNotEmpty() ? (float) $winningTrades->avg() : 0.0;
         $averageLoss = $losingTrades->isNotEmpty() ? (float) $losingTrades->avg() : 0.0;
         $payoff = $averageWin > 0 && $averageLoss < 0 ? $averageWin / abs($averageLoss) : null;
+
+        $initialBalance = (float) ($portfolio->initial_balance ?? 0);
+        $ulcerIndex = $this->ulcerIndexCalculator->calculate($equityCurve, $initialBalance);
+        $equityR2 = $this->linearRegressionService->calculateR2(
+            array_map(fn (array $point): float => (float) ($point['equity'] ?? 0), $equityCurve),
+        );
+        $absDrawdown = abs((float) $drawdown['max_drawdown']);
+        $netProfitToDrawdown = $absDrawdown > 0
+            ? round($netProfit / $absDrawdown, 4)
+            : ($netProfit > 0 ? 100.0 : 0.0);
+
+        $monthlyProfits = $this->monthlyProfits($trades);
+        $monthsWithTrades = count($monthlyProfits);
+        $positiveMonths = count(array_filter($monthlyProfits, fn (float $value): bool => $value > 0));
+        $negativeMonths = count(array_filter($monthlyProfits, fn (float $value): bool => $value < 0));
+        $positiveMonthsPercent = $monthsWithTrades > 0
+            ? round(($positiveMonths / $monthsWithTrades) * 100, 2)
+            : 0.0;
 
         return [
             'consolidated_net_profit' => round($netProfit, 2),
@@ -102,9 +124,40 @@ class PortfolioAnalyzerService
             'max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],
             'active_strategies_count' => $activeStrategiesCount,
             'strategies_count' => $activeStrategiesCount,
+            'ulcer_index' => $ulcerIndex,
+            'equity_r2' => $equityR2,
+            'net_profit_to_drawdown' => $netProfitToDrawdown,
+            'months_with_trades' => $monthsWithTrades,
+            'positive_months' => $positiveMonths,
+            'negative_months' => $negativeMonths,
+            'positive_months_percent' => $positiveMonthsPercent,
             'strategy_summaries' => $this->strategySummaries($portfolio),
             'consolidated_trades' => $this->summarizedTrades($trades),
         ];
+    }
+
+    /**
+     * Weighted net profit bucketed by calendar month (Y-m), only for months that had trades.
+     *
+     * @param  Collection<int, object>  $trades
+     * @return array<string, float>
+     */
+    private function monthlyProfits(Collection $trades): array
+    {
+        $months = [];
+
+        foreach ($trades as $trade) {
+            $exitTime = $this->exitTime($trade);
+
+            if ($exitTime === null) {
+                continue;
+            }
+
+            $key = $exitTime->format('Y-m');
+            $months[$key] = ($months[$key] ?? 0.0) + (float) data_get($trade, 'net_profit', 0);
+        }
+
+        return array_map(fn (float $value): float => round($value, 2), $months);
     }
 
     /**

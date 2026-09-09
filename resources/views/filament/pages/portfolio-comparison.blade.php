@@ -1,5 +1,5 @@
 @php
-    use App\Filament\Resources\Strategies\StrategyResource;
+    use App\Filament\Resources\Portfolios\PortfolioResource;
 
     $money = fn (mixed $value): string => 'R$ ' . number_format(abs((float) $value), 2, ',', '.');
     $signedMoney = fn (mixed $value): string =>
@@ -47,6 +47,7 @@
     $emptyLabel = fn (string $key, bool $hasData): string => $hasData
         ? match ($key) {
             'profit_factor' => 'Sem perdas',
+            'average_payoff' => 'Sem perdas',
             'net_profit_to_drawdown' => 'Sem drawdown',
             default => '—',
         }
@@ -73,8 +74,8 @@
     };
 
     $rowGroups = collect($comparison['rows'] ?? [])->groupBy('group');
-    $first = $comparison['strategies'][0] ?? null;
-    $second = $comparison['strategies'][1] ?? null;
+    $first = $comparison['portfolios'][0] ?? null;
+    $second = $comparison['portfolios'][1] ?? null;
 @endphp
 
 @once
@@ -295,52 +296,36 @@
     <div class="sc-card">
         <div class="sc-card-header">
             <div>
-                <div class="sc-card-title">Estratégias comparadas</div>
-                <div class="sc-card-subtitle">Escolha duas estratégias e, se quiser, restrinja a execução de backtest usada de cada lado.</div>
+                <div class="sc-card-title">Portfólios comparados</div>
+                <div class="sc-card-subtitle">Escolha dois portfólios salvos. As métricas usam as estratégias ativas e os pesos atuais de cada um.</div>
             </div>
-            <a href="{{ $strategiesUrl }}" class="sc-btn-ghost">Ver estratégias</a>
+            <a href="{{ $portfoliosUrl }}" class="sc-btn-ghost">Ver portfólios</a>
         </div>
         <div class="sc-card-body">
             <div class="sc-select-grid">
                 <div class="sc-side-stack">
                     <div>
-                        <label class="sc-label" for="sc-first-strategy">Estratégia A</label>
-                        <select id="sc-first-strategy" class="sc-input" wire:model.live="firstStrategyId">
-                            <option value="">Selecione uma estratégia...</option>
-                            @foreach ($availableStrategies as $strategy)
-                                <option value="{{ $strategy->id }}">{{ $strategy->is_favorite ? '★ ' : '' }}{{ $strategy->name }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div>
-                        <label class="sc-label" for="sc-first-execution">Execução da estratégia A</label>
-                        <select id="sc-first-execution" class="sc-input" wire:model.live="firstBacktestId">
-                            @foreach ($firstExecutionOptions as $value => $label)
-                                <option value="{{ $value }}">{{ $label }}</option>
+                        <label class="sc-label" for="pc-first">Portfólio A</label>
+                        <select id="pc-first" class="sc-input" wire:model.live="firstPortfolioId">
+                            <option value="">Selecione um portfólio...</option>
+                            @foreach ($availablePortfolios as $portfolio)
+                                <option value="{{ $portfolio->id }}">{{ $portfolio->name }} ({{ $portfolio->strategies_count }} estratégias)</option>
                             @endforeach
                         </select>
                     </div>
                 </div>
 
                 <div class="sc-swap">
-                    <button type="button" class="sc-btn-ghost" wire:click="swapStrategies" title="Inverter A e B">⇄ Inverter</button>
+                    <button type="button" class="sc-btn-ghost" wire:click="swapPortfolios" title="Inverter A e B">⇄ Inverter</button>
                 </div>
 
                 <div class="sc-side-stack">
                     <div>
-                        <label class="sc-label" for="sc-second-strategy">Estratégia B</label>
-                        <select id="sc-second-strategy" class="sc-input" wire:model.live="secondStrategyId">
-                            <option value="">Selecione uma estratégia...</option>
-                            @foreach ($availableStrategies as $strategy)
-                                <option value="{{ $strategy->id }}">{{ $strategy->is_favorite ? '★ ' : '' }}{{ $strategy->name }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div>
-                        <label class="sc-label" for="sc-second-execution">Execução da estratégia B</label>
-                        <select id="sc-second-execution" class="sc-input" wire:model.live="secondBacktestId">
-                            @foreach ($secondExecutionOptions as $value => $label)
-                                <option value="{{ $value }}">{{ $label }}</option>
+                        <label class="sc-label" for="pc-second">Portfólio B</label>
+                        <select id="pc-second" class="sc-input" wire:model.live="secondPortfolioId">
+                            <option value="">Selecione um portfólio...</option>
+                            @foreach ($availablePortfolios as $portfolio)
+                                <option value="{{ $portfolio->id }}">{{ $portfolio->name }} ({{ $portfolio->strategies_count }} estratégias)</option>
                             @endforeach
                         </select>
                     </div>
@@ -349,8 +334,8 @@
 
             <div class="sc-params">
                 <div>
-                    <label class="sc-label" for="sc-period">Período da correlação</label>
-                    <select id="sc-period" class="sc-input" wire:model.live="correlationPeriod">
+                    <label class="sc-label" for="pc-period">Período da correlação</label>
+                    <select id="pc-period" class="sc-input" wire:model.live="correlationPeriod">
                         @foreach ($periodOptions as $value => $label)
                             <option value="{{ $value }}">{{ $label }}</option>
                         @endforeach
@@ -359,8 +344,8 @@
             </div>
 
             <div class="sc-actions">
-                <button type="button" class="sc-btn sc-btn-primary" wire:click="compare" wire:loading.attr="disabled">
-                    <span wire:loading.remove wire:target="compare">Comparar estratégias</span>
+                <button type="button" class="sc-btn sc-btn-primary" wire:click="compare" wire:loading.attr="disabled" wire:target="compare">
+                    <span wire:loading.remove wire:target="compare">Comparar portfólios</span>
                     <span wire:loading wire:target="compare">Calculando...</span>
                 </button>
                 <button type="button" class="sc-btn-ghost" wire:click="clearComparison">Limpar</button>
@@ -374,7 +359,7 @@
 
     @if (! $isCompared)
         <div class="sc-card">
-            <div class="sc-empty">Selecione duas estratégias e clique em <strong>Comparar estratégias</strong> para ver o resultado lado a lado.</div>
+            <div class="sc-empty">Selecione dois portfólios e clique em <strong>Comparar portfólios</strong> para ver o resultado lado a lado.</div>
         </div>
     @else
         {{-- ====================== VEREDITO ====================== --}}
@@ -395,15 +380,15 @@
             </div>
         </div>
 
-        {{-- ====================== RESUMO POR ESTRATÉGIA ====================== --}}
+        {{-- ====================== RESUMO POR PORTFÓLIO ====================== --}}
         <div class="sc-grid-2">
             @foreach ([$first, $second] as $index => $side)
-                @php $metrics = $side['metrics']; @endphp
+                @php $m = $side['metrics']; @endphp
                 <div class="sc-strategy-card">
                     <div class="sc-strategy-top" style="--sc-color: {{ $side['color'] }}">
                         <div style="display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;">
                             <span class="sc-dot" style="background: {{ $side['color'] }}"></span>
-                            <a class="sc-strategy-name" style="text-decoration: none;" href="{{ StrategyResource::getUrl('results', ['record' => $side['id']]) }}">
+                            <a class="sc-strategy-name" style="text-decoration: none;" href="{{ PortfolioResource::getUrl('results', ['record' => $side['id']]) }}">
                                 {{ $index === 0 ? 'A' : 'B' }}. {{ $side['name'] }}
                             </a>
                             @if ($comparison['verdict']['leader'] === $index)
@@ -411,33 +396,28 @@
                             @endif
                         </div>
                         <div class="sc-strategy-meta">
-                            <span class="sc-badge">{{ $side['asset_label'] }}</span>
-                            <span>{{ $side['execution_label'] }}</span>
-                            <span>
-                                {{ $metrics['first_trade_date'] ? \Carbon\CarbonImmutable::parse($metrics['first_trade_date'])->format('d/m/Y') : '-' }}
-                                a
-                                {{ $metrics['last_trade_date'] ? \Carbon\CarbonImmutable::parse($metrics['last_trade_date'])->format('d/m/Y') : '-' }}
-                            </span>
+                            <span class="sc-badge">{{ $integer($side['strategies_count']) }} estratégias ativas</span>
+                            <span>{{ $integer($m['total_trades']) }} trades</span>
                         </div>
                     </div>
                     <div class="sc-mini-grid">
                         <div class="sc-mini">
                             <div class="sc-mini-label">Resultado líquido</div>
-                            <div class="sc-mini-value {{ $valueTone($metrics['net_profit'], 'money') }}">{{ $signedMoney($metrics['net_profit']) }}</div>
+                            <div class="sc-mini-value {{ $valueTone($m['net_profit'], 'money') }}">{{ $signedMoney($m['net_profit']) }}</div>
                         </div>
                         <div class="sc-mini">
                             <div class="sc-mini-label">Drawdown máximo</div>
-                            <div class="sc-mini-value {{ (float) $metrics['max_drawdown'] > 0 ? 'sc-negative' : 'sc-muted' }}">
-                                {{ (float) $metrics['max_drawdown'] > 0 ? '-' . $money($metrics['max_drawdown']) : $money(0) }}
+                            <div class="sc-mini-value {{ (float) $m['max_drawdown'] > 0 ? 'sc-negative' : 'sc-muted' }}">
+                                {{ (float) $m['max_drawdown'] > 0 ? '-' . $money($m['max_drawdown']) : $money(0) }}
                             </div>
                         </div>
                         <div class="sc-mini">
                             <div class="sc-mini-label">Profit factor</div>
-                            <div class="sc-mini-value">{{ $metrics['profit_factor'] === null ? ($metrics['has_data'] ? 'Sem perdas' : '—') : number_format((float) $metrics['profit_factor'], 2, ',', '.') }}</div>
+                            <div class="sc-mini-value">{{ $m['profit_factor'] === null ? ($side['has_data'] ? 'Sem perdas' : '—') : number_format((float) $m['profit_factor'], 2, ',', '.') }}</div>
                         </div>
                         <div class="sc-mini">
-                            <div class="sc-mini-label">Trades / acerto</div>
-                            <div class="sc-mini-value">{{ $integer($metrics['total_trades']) }} <span class="sc-muted" style="font-size: .8125rem; font-weight: 500;">/ {{ $percent($metrics['win_rate']) }}</span></div>
+                            <div class="sc-mini-label">Meses positivos / R²</div>
+                            <div class="sc-mini-value">{{ $percent($m['positive_months_percent']) }} <span class="sc-muted" style="font-size: .8125rem; font-weight: 500;">/ {{ number_format((float) $m['equity_r2'], 3, ',', '.') }}</span></div>
                         </div>
                     </div>
                 </div>
@@ -449,7 +429,7 @@
             <div class="sc-card-header">
                 <div>
                     <div class="sc-card-title">Curvas de capital sobrepostas</div>
-                    <div class="sc-card-subtitle">Resultado acumulado das duas estratégias no mesmo eixo de tempo.</div>
+                    <div class="sc-card-subtitle">Resultado consolidado acumulado dos dois portfólios no mesmo eixo de tempo.</div>
                 </div>
             </div>
 
@@ -474,9 +454,11 @@
                         @foreach ($chart['series'] as $series)
                             @if ($series['has_points'])
                                 <polyline points="{{ $series['line'] }}" fill="none" stroke="{{ $series['color'] }}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
-                                <circle cx="{{ $series['final_x'] }}" cy="{{ $series['final_y'] }}" r="4" fill="{{ $series['color'] }}">
-                                    <title>{{ $series['label'] }} | {{ $signedMoney($series['final_equity']) }}</title>
-                                </circle>
+                                @if ($series['final_x'] !== null)
+                                    <circle cx="{{ $series['final_x'] }}" cy="{{ $series['final_y'] }}" r="4" fill="{{ $series['color'] }}">
+                                        <title>{{ $series['label'] }} | {{ $signedMoney($series['final_equity']) }}</title>
+                                    </circle>
+                                @endif
                             @endif
                         @endforeach
 
@@ -502,7 +484,7 @@
             <div class="sc-card-header">
                 <div>
                     <div class="sc-card-title">Métricas lado a lado</div>
-                    <div class="sc-card-subtitle">A célula destacada indica a estratégia com melhor número em cada métrica.</div>
+                    <div class="sc-card-subtitle">A célula destacada indica o portfólio com melhor número em cada métrica.</div>
                 </div>
             </div>
             <div class="sc-table-wrap">
@@ -534,12 +516,12 @@
                                     </td>
                                     <td class="sc-num {{ $row['winner'] === 0 ? 'sc-win' : '' }}">
                                         <span class="{{ $valueTone($row['first_value'], $row['format']) }}">
-                                            {{ $row['first_value'] === null ? $emptyLabel($row['key'], (bool) $first['metrics']['has_data']) : $formatValue($row['first_value'], $row['format']) }}
+                                            {{ $row['first_value'] === null ? $emptyLabel($row['key'], (bool) $first['has_data']) : $formatValue($row['first_value'], $row['format']) }}
                                         </span>
                                     </td>
                                     <td class="sc-num {{ $row['winner'] === 1 ? 'sc-win' : '' }}">
                                         <span class="{{ $valueTone($row['second_value'], $row['format']) }}">
-                                            {{ $row['second_value'] === null ? $emptyLabel($row['key'], (bool) $second['metrics']['has_data']) : $formatValue($row['second_value'], $row['format']) }}
+                                            {{ $row['second_value'] === null ? $emptyLabel($row['key'], (bool) $second['has_data']) : $formatValue($row['second_value'], $row['format']) }}
                                         </span>
                                     </td>
                                     <td class="sc-num sc-muted">{{ $formatDifference($row['difference'], $row['format']) }}</td>
@@ -556,11 +538,11 @@
             <div class="sc-card-header">
                 <div>
                     <div class="sc-card-title">Resultado ano a ano</div>
-                    <div class="sc-card-subtitle">Resultado líquido de cada estratégia em cada ano com operações fechadas.</div>
+                    <div class="sc-card-subtitle">Resultado líquido consolidado de cada portfólio em cada ano com operações fechadas.</div>
                 </div>
             </div>
             @if (empty($comparison['annual']))
-                <div class="sc-empty">Nenhum ano com operações fechadas no período selecionado.</div>
+                <div class="sc-empty">Nenhum ano com operações fechadas.</div>
             @else
                 <div class="sc-table-wrap">
                     <table class="sc-table">
@@ -597,7 +579,7 @@
                 <div class="sc-card-header">
                     <div>
                         <div class="sc-card-title">Correlação</div>
-                        <div class="sc-card-subtitle">Resultado {{ mb_strtolower($comparison['filters']['period_label']) }} de uma estratégia comparado ao da outra.</div>
+                        <div class="sc-card-subtitle">Resultado {{ mb_strtolower($comparison['filters']['period_label']) }} de um portfólio comparado ao do outro.</div>
                     </div>
                 </div>
                 <div class="sc-card-body">
@@ -614,7 +596,7 @@
                 <div class="sc-card-header">
                     <div>
                         <div class="sc-card-title">Confronto direto</div>
-                        <div class="sc-card-subtitle">Em quantos períodos cada estratégia entregou o melhor resultado.</div>
+                        <div class="sc-card-subtitle">Em quantos períodos cada portfólio entregou o melhor resultado.</div>
                     </div>
                 </div>
                 <div class="sc-card-body">
@@ -643,17 +625,17 @@
         <div class="sc-card">
             <div class="sc-card-header">
                 <div>
-                    <div class="sc-card-title">E se usar as duas juntas?</div>
-                    <div class="sc-card-subtitle">Métricas da carteira formada pelos trades das duas estratégias somados.</div>
+                    <div class="sc-card-title">E se rodar os dois juntos?</div>
+                    <div class="sc-card-subtitle">Métricas da carteira formada pela união das estratégias ativas dos dois portfólios (peso médio quando repetida).</div>
                 </div>
             </div>
             @if (! $combined['has_data'])
-                <div class="sc-empty">Nenhum trade fechado para simular as duas estratégias juntas.</div>
+                <div class="sc-empty">Nenhum trade fechado para simular os dois portfólios juntos.</div>
             @else
                 <div class="sc-card-body">
                     <div class="sc-stat-grid">
                         <div class="sc-mini">
-                            <div class="sc-mini-label">Resultado líquido somado</div>
+                            <div class="sc-mini-label">Resultado líquido</div>
                             <div class="sc-mini-value {{ $valueTone($combined['net_profit'], 'money') }}">{{ $signedMoney($combined['net_profit']) }}</div>
                             <div class="sc-mini-label">Melhor individual: {{ $signedMoney($combined['best_individual_net_profit']) }}</div>
                         </div>
@@ -670,18 +652,18 @@
                         <div class="sc-mini">
                             <div class="sc-mini-label">Meses positivos</div>
                             <div class="sc-mini-value">{{ $percent($combined['positive_months_percent']) }}</div>
-                            <div class="sc-mini-label">{{ $integer($combined['total_trades']) }} trades no total</div>
+                            <div class="sc-mini-label">{{ $integer($combined['total_trades']) }} trades · Ulcer {{ number_format((float) $combined['ulcer_index'], 2, ',', '.') }}</div>
                         </div>
                     </div>
 
                     @if ($combined['drawdown_reduction'] > 0)
                         <div class="sc-alert sc-alert-success" style="margin-top: 1rem;">
-                            Operando as duas juntas, o drawdown máximo ficou {{ $money($combined['drawdown_reduction']) }}
+                            Rodando os dois juntos, o drawdown máximo ficou {{ $money($combined['drawdown_reduction']) }}
                             ({{ $percent($combined['drawdown_reduction_percent']) }}) menor do que a soma dos drawdowns individuais — sinal de que os períodos ruins não coincidem totalmente.
                         </div>
                     @else
                         <div class="sc-alert sc-alert-warning" style="margin-top: 1rem;">
-                            O drawdown da combinação ficou igual ou maior que a soma dos drawdowns individuais, indicando que as duas estratégias sofrem nos mesmos períodos.
+                            O drawdown da combinação ficou igual ou maior que a soma dos drawdowns individuais, indicando que os dois portfólios sofrem nos mesmos períodos.
                         </div>
                     @endif
                 </div>
