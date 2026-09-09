@@ -855,6 +855,9 @@
             };
             $wsCurrent = $weightSuggestion['current_metrics'] ?? [];
             $wsSuggested = $weightSuggestion['suggested_metrics'] ?? [];
+            $wsWeight = fn (mixed $value): string => (float) $value == (int) $value
+                ? number_format((float) $value, 0, ',', '.') . 'x'
+                : number_format((float) $value, 2, ',', '.') . 'x';
         @endphp
 
         <section class="mqa-strategy-card mqa-wopt">
@@ -902,8 +905,8 @@
                                     @php $wsChanged = abs((float) $ws['current_weight'] - (float) $ws['suggested_weight']) >= 0.01; @endphp
                                     <tr>
                                         <td class="mqa-left">{{ $ws['name'] }}</td>
-                                        <td class="mqa-right">{{ $formatWeight($ws['current_weight']) }}</td>
-                                        <td class="mqa-right {{ $wsChanged ? 'mqa-wopt-changed' : '' }}">{{ $formatWeight($ws['suggested_weight']) }}</td>
+                                        <td class="mqa-right">{{ $wsWeight($ws['current_weight']) }}</td>
+                                        <td class="mqa-right {{ $wsChanged ? 'mqa-wopt-changed' : '' }}">{{ $wsWeight($ws['suggested_weight']) }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>

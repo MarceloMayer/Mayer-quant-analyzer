@@ -15,6 +15,11 @@ use App\Services\Metrics\DrawdownCalculator;
  *   - ulcer_index            → minimize (depth + duration of drawdowns)
  *   - positive_months_percent → maximize (share of months in the green)
  *
+ * Weights are whole numbers only: a weight is a contract multiplier and BM&F mini
+ * contracts (mini-índice / mini-dólar) trade in whole units, so 0.5 or 1.5 make no
+ * physical sense. The grid steps by 1, and the suggested weights are reduced by their
+ * greatest common divisor so the smallest ratio is returned (e.g. 2:4 → 1:2).
+ *
  * The search runs a full grid for small portfolios and random-restart hill climbing
  * for larger ones, capped by a fixed evaluation budget. Reconstructing the weighted
  * equity curve is done in a single pass per evaluation (no array allocation) for speed;
@@ -27,17 +32,19 @@ class PortfolioWeightOptimizerService
 
     public const OBJECTIVE_POSITIVE_MONTHS = 'positive_months_percent';
 
-    private const GRID_STEP = 0.5;
+    private const GRID_STEP = 1;
 
-    private const GRID_MIN = 0.5;
+    private const GRID_MIN = 1;
 
-    private const GRID_MAX = 3.0;
+    private const GRID_MAX = 6;
 
     private const MAX_EVALUATIONS = 2500;
 
     private const HILL_CLIMB_RESTARTS = 30;
 
     private const FULL_GRID_MAX_STRATEGIES = 4;
+
+    private const FULL_GRID_MAX_POINTS = 4096;
 
     public function __construct(
         private readonly DrawdownCalculator $drawdownCalculator,
@@ -57,14 +64,14 @@ class PortfolioWeightOptimizerService
     }
 
     /**
-     * @param  array{min?: float, max?: float}  $bounds
+     * @param  array{min?: int|float, max?: int|float}  $bounds
      * @return array<string, mixed>
      */
     public function optimize(Portfolio $portfolio, string $objective, array $bounds = []): array
     {
         $objective = array_key_exists($objective, self::objectiveOptions()) ? $objective : self::OBJECTIVE_ULCER;
-        $min = max(0.0, (float) ($bounds['min'] ?? self::GRID_MIN));
-        $max = max($min + self::GRID_STEP, (float) ($bounds['max'] ?? self::GRID_MAX));
+        $min = max(1, (int) round((float) ($bounds['min'] ?? self::GRID_MIN)));
+        $max = max($min + self::GRID_STEP, (int) round((float) ($bounds['max'] ?? self::GRID_MAX)));
 
         $enabled = $portfolio->portfolioStrategies()
             ->where('enabled', true)
@@ -93,11 +100,15 @@ class PortfolioWeightOptimizerService
 
         $baseline = (float) ($portfolio->initial_balance ?? 0);
         $grid = $this->gridValues($min, $max);
+
+        // Actual stored weights drive the "current" metrics/display; a grid-snapped copy
+        // is only the starting point for the search.
         $currentWeights = $enabled
             ->mapWithKeys(fn (PortfolioStrategy $row): array => [
-                (int) $row->strategy_id => $this->snapToGrid((float) ($row->weight ?? 1), $grid),
+                (int) $row->strategy_id => (float) ($row->weight ?? 1),
             ])
             ->all();
+        $searchStart = array_map(fn (float $weight): float => $this->snapToGrid($weight, $grid), $currentWeights);
 
         $evaluations = 0;
         $evaluate = function (array $weights) use ($trades, $baseline, $objective, &$evaluations): float {
@@ -106,7 +117,7 @@ class PortfolioWeightOptimizerService
             return $this->objectiveValue($this->fastMetrics($trades, $weights, $baseline), $objective);
         };
 
-        $best = $this->search($strategyIds, $grid, $currentWeights, $evaluate, $evaluations);
+        $best = $this->search($strategyIds, $grid, $searchStart, $evaluate, $evaluations);
 
         $suggestedWeights = $this->normalize($best);
 
@@ -262,7 +273,9 @@ class PortfolioWeightOptimizerService
      */
     private function search(array $strategyIds, array $grid, array $currentWeights, callable $evaluate, int &$evaluations): array
     {
-        if (count($strategyIds) <= self::FULL_GRID_MAX_STRATEGIES) {
+        $gridPoints = count($grid) ** count($strategyIds);
+
+        if (count($strategyIds) <= self::FULL_GRID_MAX_STRATEGIES && $gridPoints <= self::FULL_GRID_MAX_POINTS) {
             return $this->fullGridSearch($strategyIds, $grid, $currentWeights, $evaluate);
         }
 
@@ -381,14 +394,16 @@ class PortfolioWeightOptimizerService
     }
 
     /**
+     * Whole-number weights only (contract multipliers), from $min to $max inclusive.
+     *
      * @return float[]
      */
-    private function gridValues(float $min, float $max): array
+    private function gridValues(int $min, int $max): array
     {
         $values = [];
 
-        for ($value = $min; $value <= $max + 1e-9; $value += self::GRID_STEP) {
-            $values[] = round($value, 2);
+        for ($value = $min; $value <= $max; $value++) {
+            $values[] = (float) $value;
         }
 
         return $values === [] ? [1.0] : $values;
@@ -411,20 +426,34 @@ class PortfolioWeightOptimizerService
     }
 
     /**
-     * Scales weights so the smallest one is 1, keeping them easy to read.
+     * Reduces whole-number weights by their greatest common divisor, so the smallest
+     * equivalent integer ratio is returned (e.g. [2, 4, 6] → [1, 2, 3]).
      *
      * @param  array<int, float>  $weights
      * @return array<int, float>
      */
     private function normalize(array $weights): array
     {
-        $min = min($weights);
+        $ints = array_map(static fn (float $value): int => max(1, (int) round($value)), $weights);
+        $divisor = array_reduce($ints, fn (int $carry, int $value): int => $this->gcd($carry, $value), 0);
 
-        if ($min <= 0) {
-            return array_map(fn (float $value): float => round($value, 2), $weights);
+        if ($divisor <= 1) {
+            return array_map(static fn (int $value): float => (float) $value, $ints);
         }
 
-        return array_map(fn (float $value): float => round($value / $min, 2), $weights);
+        return array_map(static fn (int $value): float => (float) intdiv($value, $divisor), $ints);
+    }
+
+    private function gcd(int $a, int $b): int
+    {
+        $a = abs($a);
+        $b = abs($b);
+
+        while ($b !== 0) {
+            [$a, $b] = [$b, $a % $b];
+        }
+
+        return $a;
     }
 
     /**

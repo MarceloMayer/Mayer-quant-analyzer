@@ -165,15 +165,17 @@ class PortfolioResultsPage extends ViewRecord
                         ->required(),
                     TextInput::make('min_weight')
                         ->label('Peso mínimo por estratégia')
-                        ->helperText('Use 0 para permitir que uma estratégia seja praticamente desativada.')
-                        ->numeric()
-                        ->minValue(0)
-                        ->default(0.5),
+                        ->helperText('Número inteiro de contratos (mini-índice e mini-dólar operam em múltiplos de 1).')
+                        ->integer()
+                        ->minValue(1)
+                        ->maxValue(20)
+                        ->default(1),
                     TextInput::make('max_weight')
                         ->label('Peso máximo por estratégia')
-                        ->numeric()
-                        ->minValue(0.5)
-                        ->default(3),
+                        ->integer()
+                        ->minValue(1)
+                        ->maxValue(20)
+                        ->default(6),
                 ])
                 ->action(function (array $data): void {
                     $this->runWeightOptimization($data);
@@ -191,8 +193,8 @@ class PortfolioResultsPage extends ViewRecord
             $this->portfolio(),
             (string) ($data['objective'] ?? PortfolioWeightOptimizerService::OBJECTIVE_ULCER),
             [
-                'min' => (float) ($data['min_weight'] ?? 0.5),
-                'max' => (float) ($data['max_weight'] ?? 3),
+                'min' => (int) ($data['min_weight'] ?? 1),
+                'max' => (int) ($data['max_weight'] ?? 6),
             ],
         );
 
