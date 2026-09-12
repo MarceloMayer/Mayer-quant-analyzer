@@ -12,7 +12,9 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withCommands()
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Atras do Cloudflare Tunnel / proxy reverso: confiar nos cabecalhos
+        // X-Forwarded-* para gerar URLs https e cookies "secure" corretamente.
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
