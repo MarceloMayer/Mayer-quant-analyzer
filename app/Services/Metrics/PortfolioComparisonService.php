@@ -2,17 +2,22 @@
 
 namespace App\Services\Metrics;
 
-use App\Models\Strategy;
-use App\Models\StrategyBacktestExecution;
+use App\Models\Portfolio;
 use App\Models\Trade;
 use App\Services\Portfolio\LinearRegressionService;
 use App\Services\Portfolio\UlcerIndexCalculator;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
-use Illuminate\Support\Arr;
-use Illuminate\Support\Collection;
 
-class StrategyComparisonService
+/**
+ * Side-by-side comparison of two saved portfolios: metric-by-metric verdict, overlaid
+ * equity curves, year-by-year result, correlation between the two consolidated P&L
+ * series and the effect of running both portfolios together.
+ *
+ * Mirrors StrategyComparisonService, but each side's numbers come straight from
+ * PortfolioAnalyzerService so they match the portfolio results page.
+ */
+class PortfolioComparisonService
 {
     public const PERIOD_DAILY = 'daily';
 
@@ -20,13 +25,9 @@ class StrategyComparisonService
 
     public const PERIOD_MONTHLY = 'monthly';
 
-    public const ALL_EXECUTIONS = '';
-
     public const FIRST_COLOR = '#2563eb';
 
     public const SECOND_COLOR = '#f97316';
-
-    public const COMBINED_COLOR = '#16a34a';
 
     private const CHART_WIDTH = 900;
 
@@ -43,14 +44,10 @@ class StrategyComparisonService
     private const MAX_CHART_POINTS = 320;
 
     public function __construct(
-        private readonly EquityCurveService $equityCurveService,
+        private readonly PortfolioAnalyzerService $portfolioAnalyzer,
         private readonly DrawdownCalculator $drawdownCalculator,
-        private readonly DaysWithoutNewHighCalculator $daysWithoutNewHighCalculator,
-        private readonly MonthlyPerformanceService $monthlyPerformanceService,
-        private readonly StreakCalculator $streakCalculator,
         private readonly UlcerIndexCalculator $ulcerIndexCalculator,
         private readonly LinearRegressionService $linearRegressionService,
-        private readonly InitialCapitalResolver $initialCapitalResolver,
     ) {}
 
     /**
@@ -66,32 +63,26 @@ class StrategyComparisonService
     }
 
     /**
-     * Compares two strategies side by side.
-     *
-     * @param  array{first_backtest_id?: string|null, second_backtest_id?: string|null, correlation_period?: string|null}  $options
+     * @param  array{correlation_period?: string|null}  $options
      * @return array<string, mixed>
      */
-    public function compare(Strategy $first, Strategy $second, array $options = []): array
+    public function compare(Portfolio $first, Portfolio $second, array $options = []): array
     {
         $period = $this->normalizePeriod((string) ($options['correlation_period'] ?? self::PERIOD_MONTHLY));
 
-        $firstTrades = $this->trades($first, $options['first_backtest_id'] ?? null);
-        $secondTrades = $this->trades($second, $options['second_backtest_id'] ?? null);
-
-        $firstCapital = $this->initialCapitalResolver->resolve($first, $options['first_backtest_id'] ?? null);
-        $secondCapital = $this->initialCapitalResolver->resolve($second, $options['second_backtest_id'] ?? null);
-
-        $firstMetrics = $this->metrics($firstTrades, $firstCapital);
-        $secondMetrics = $this->metrics($secondTrades, $secondCapital);
-        $combinedMetrics = $this->metrics($firstTrades->merge($secondTrades), $firstCapital + $secondCapital);
+        $firstMetrics = $this->portfolioAnalyzer->calculate($first);
+        $secondMetrics = $this->portfolioAnalyzer->calculate($second);
 
         $rows = $this->rows($firstMetrics, $secondMetrics);
         $score = $this->score($rows);
 
         $sides = [
-            $this->side($first, $options['first_backtest_id'] ?? null, $firstMetrics, self::FIRST_COLOR, $score[0]),
-            $this->side($second, $options['second_backtest_id'] ?? null, $secondMetrics, self::SECOND_COLOR, $score[1]),
+            $this->side($first, $firstMetrics, self::FIRST_COLOR, $score[0]),
+            $this->side($second, $secondMetrics, self::SECOND_COLOR, $score[1]),
         ];
+
+        $firstSeries = $this->periodSeriesFromTrades($firstMetrics['consolidated_trades'] ?? [], $period);
+        $secondSeries = $this->periodSeriesFromTrades($secondMetrics['consolidated_trades'] ?? [], $period);
 
         return [
             'generated_at' => now()->format('d/m/Y H:i'),
@@ -100,206 +91,52 @@ class StrategyComparisonService
                 'period_label' => $this->periodOptions()[$period],
                 'period_options' => $this->periodOptions(),
             ],
-            'strategies' => $sides,
-            'has_data' => $firstMetrics['total_trades'] > 0 || $secondMetrics['total_trades'] > 0,
+            'portfolios' => $sides,
+            'has_data' => ($firstMetrics['total_trades'] ?? 0) > 0 || ($secondMetrics['total_trades'] ?? 0) > 0,
             'rows' => $rows,
             'verdict' => $this->verdict($sides, $rows),
             'chart' => $this->chart($firstMetrics, $secondMetrics, $sides),
             'annual' => $this->annualComparison($firstMetrics, $secondMetrics),
-            'head_to_head' => $this->headToHead($firstTrades, $secondTrades, $period),
-            'correlation' => $this->correlation($firstTrades, $secondTrades, $period, $sides),
-            'combined' => $this->combined($firstMetrics, $secondMetrics, $combinedMetrics),
+            'head_to_head' => $this->headToHead($firstSeries, $secondSeries),
+            'correlation' => $this->correlation($firstSeries, $secondSeries, $sides, $period),
+            'combined' => $this->combined($first, $second, $firstMetrics, $secondMetrics),
         ];
-    }
-
-    /**
-     * Backtest executions available for a strategy, ready for a select input.
-     *
-     * @return array<string, string>
-     */
-    public function executionOptions(Strategy $strategy): array
-    {
-        $options = [self::ALL_EXECUTIONS => 'Todas as execuções'];
-
-        $executions = StrategyBacktestExecution::query()
-            ->where('strategy_id', $strategy->id)
-            ->orderByDesc('imported_at')
-            ->orderByDesc('id')
-            ->get(['backtest_id', 'name', 'execution_type']);
-
-        foreach ($executions as $execution) {
-            $backtestId = (string) $execution->backtest_id;
-
-            if ($backtestId === '') {
-                continue;
-            }
-
-            $label = (string) ($execution->name ?: $backtestId);
-            $typeLabel = StrategyBacktestExecution::executionTypeLabel($execution->execution_type);
-
-            $options[$backtestId] = "{$label} ({$typeLabel})";
-        }
-
-        return $options;
-    }
-
-    /**
-     * @return Collection<int, Trade>
-     */
-    private function trades(Strategy $strategy, ?string $backtestId): Collection
-    {
-        return Trade::query()
-            ->where('strategy_id', $strategy->id)
-            ->whereNotNull('exit_time')
-            ->when(filled($backtestId), fn ($query) => $query->where('backtest_id', $backtestId))
-            ->orderBy('exit_time')
-            ->orderBy('id')
-            ->get(['id', 'strategy_id', 'backtest_id', 'exit_time', 'net_profit']);
     }
 
     /**
      * @param  array<string, mixed>  $metrics
      * @return array<string, mixed>
      */
-    private function side(Strategy $strategy, ?string $backtestId, array $metrics, string $color, int $wins): array
+    private function side(Portfolio $portfolio, array $metrics, string $color, int $wins): array
     {
         return [
-            'id' => $strategy->id,
-            'name' => $strategy->name,
-            'asset' => $strategy->asset,
-            'asset_label' => Strategy::assetOptions()[$strategy->asset] ?? ($strategy->asset ?: '-'),
-            'magic_number' => $strategy->magic_number,
-            'backtest_id' => filled($backtestId) ? $backtestId : null,
-            'execution_label' => filled($backtestId)
-                ? ($this->executionOptions($strategy)[$backtestId] ?? $backtestId)
-                : 'Todas as execuções',
+            'id' => $portfolio->id,
+            'name' => $portfolio->name,
             'color' => $color,
             'wins' => $wins,
-            // The equity curve is already rendered by the chart, so it is dropped here
-            // to keep the Livewire payload of the comparison page small.
-            'metrics' => Arr::except($metrics, ['equity_curve', 'monthly_performance']),
+            'strategies_count' => $metrics['active_strategies_count'] ?? 0,
+            'has_data' => ($metrics['total_trades'] ?? 0) > 0,
+            'metrics' => [
+                'net_profit' => (float) ($metrics['net_profit'] ?? 0),
+                'max_drawdown' => (float) ($metrics['max_drawdown'] ?? 0),
+                'profit_factor' => $metrics['profit_factor'] ?? null,
+                'win_rate' => (float) ($metrics['win_rate'] ?? 0),
+                'total_trades' => (int) ($metrics['total_trades'] ?? 0),
+                'ulcer_index' => (float) ($metrics['ulcer_index'] ?? 0),
+                'equity_r2' => (float) ($metrics['equity_r2'] ?? 0),
+                'positive_months_percent' => (float) ($metrics['positive_months_percent'] ?? 0),
+            ],
         ];
     }
 
     /**
-     * Calculates every metric used by the comparison from a set of closed trades.
-     *
-     * @param  Collection<int, Trade>  $trades
-     * @return array<string, mixed>
-     */
-    private function metrics(Collection $trades, float $initialBalance = 0.0): array
-    {
-        $trades = $trades
-            ->sort(fn (Trade $first, Trade $second): int => [
-                $first->exit_time?->getTimestamp() ?? 0,
-                $first->id,
-            ] <=> [
-                $second->exit_time?->getTimestamp() ?? 0,
-                $second->id,
-            ])
-            ->values();
-
-        $equityCurve = $this->equityCurveService->calculate($trades);
-        $drawdown = $this->drawdownCalculator->calculate($equityCurve, $initialBalance);
-        $streaks = $this->streakCalculator->calculate($trades);
-        $monthlyPerformance = $this->monthlyPerformanceService->calculate($trades);
-        $daysWithoutNewHigh = $this->daysWithoutNewHighCalculator->calculate($equityCurve);
-
-        $profits = $trades->map(fn (Trade $trade): float => (float) $trade->net_profit);
-        $winningTrades = $profits->filter(fn (float $profit): bool => $profit > 0);
-        $losingTrades = $profits->filter(fn (float $profit): bool => $profit < 0);
-        $grossProfit = (float) $winningTrades->sum();
-        $grossLoss = abs((float) $losingTrades->sum());
-        $netProfit = (float) $profits->sum();
-        $totalTrades = $profits->count();
-        $averageWin = $winningTrades->isNotEmpty() ? (float) $winningTrades->avg() : 0.0;
-        $averageLoss = $losingTrades->isNotEmpty() ? (float) $losingTrades->avg() : 0.0;
-        $payoff = $averageWin > 0 && $averageLoss < 0 ? $averageWin / abs($averageLoss) : null;
-        $monthlyProfits = $this->monthlyProfits($trades);
-        $positiveMonths = count(array_filter($monthlyProfits, fn (float $profit): bool => $profit > 0));
-        $monthsWithTrades = count($monthlyProfits);
-
-        return [
-            'has_data' => $totalTrades > 0,
-            'net_profit' => round($netProfit, 2),
-            'gross_profit' => round($grossProfit, 2),
-            'gross_loss' => round($grossLoss, 2),
-            'total_trades' => $totalTrades,
-            'winning_trades' => $winningTrades->count(),
-            'losing_trades' => $losingTrades->count(),
-            'win_rate' => $totalTrades > 0 ? round(($winningTrades->count() / $totalTrades) * 100, 2) : 0.0,
-            'profit_factor' => $grossLoss > 0 ? round($grossProfit / $grossLoss, 2) : null,
-            'payoff' => $payoff !== null ? round($payoff, 2) : null,
-            'average_trade' => $totalTrades > 0 ? round($netProfit / $totalTrades, 2) : 0.0,
-            'average_win' => round($averageWin, 2),
-            'average_loss' => round($averageLoss, 2),
-            'best_trade' => $profits->isNotEmpty() ? round((float) $profits->max(), 2) : 0.0,
-            'worst_trade' => $profits->isNotEmpty() ? round((float) $profits->min(), 2) : 0.0,
-            'max_drawdown' => $drawdown['max_drawdown'],
-            'max_drawdown_percent' => $drawdown['max_drawdown_percent'],
-            'net_profit_to_drawdown' => $drawdown['max_drawdown'] > 0
-                ? round($netProfit / $drawdown['max_drawdown'], 2)
-                : null,
-            'max_winning_streak' => $streaks['max_winning_streak'],
-            'max_losing_streak' => $streaks['max_losing_streak'],
-            'max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],
-            'months_with_trades' => $monthsWithTrades,
-            'positive_months' => $positiveMonths,
-            'negative_months' => count(array_filter($monthlyProfits, fn (float $profit): bool => $profit < 0)),
-            'positive_months_percent' => $monthsWithTrades > 0
-                ? round(($positiveMonths / $monthsWithTrades) * 100, 2)
-                : 0.0,
-            'average_monthly_profit' => $monthsWithTrades > 0
-                ? round($netProfit / $monthsWithTrades, 2)
-                : 0.0,
-            'ulcer_index' => $this->ulcerIndexCalculator->calculate($equityCurve, $initialBalance),
-            'equity_r2' => $this->linearRegressionService->calculateR2(
-                array_map(fn (array $point): float => (float) $point['equity'], $equityCurve),
-            ),
-            'first_trade_date' => $trades->first()?->exit_time?->format('Y-m-d'),
-            'last_trade_date' => $trades->last()?->exit_time?->format('Y-m-d'),
-            'monthly_performance' => $monthlyPerformance,
-            'equity_curve' => $equityCurve,
-        ];
-    }
-
-    /**
-     * Monthly net profit keyed by `Y-m`, only for months that had trades.
-     *
-     * @param  Collection<int, Trade>  $trades
-     * @return array<string, float>
-     */
-    private function monthlyProfits(Collection $trades): array
-    {
-        $months = [];
-
-        foreach ($trades as $trade) {
-            if ($trade->exit_time === null) {
-                continue;
-            }
-
-            $key = $trade->exit_time->format('Y-m');
-            $months[$key] ??= 0.0;
-            $months[$key] += (float) $trade->net_profit;
-        }
-
-        ksort($months);
-
-        return array_map(fn (float $profit): float => round($profit, 2), $months);
-    }
-
-    /**
-     * Metric-by-metric comparison rows.
-     *
      * @param  array<string, mixed>  $first
      * @param  array<string, mixed>  $second
      * @return array<int, array<string, mixed>>
      */
     private function rows(array $first, array $second): array
     {
-        // Without trades on both sides every metric would be compared against zeroes,
-        // so the comparison is shown but nothing is declared a winner.
-        $comparable = $first['has_data'] && $second['has_data'];
+        $comparable = ($first['total_trades'] ?? 0) > 0 && ($second['total_trades'] ?? 0) > 0;
 
         return collect($this->definitions())
             ->map(function (array $definition) use ($first, $second, $comparable): array {
@@ -333,39 +170,32 @@ class StrategyComparisonService
     private function definitions(): array
     {
         return [
-            ['key' => 'net_profit', 'label' => 'Resultado líquido', 'hint' => 'Soma do lucro líquido de todos os trades fechados.', 'group' => 'Retorno', 'format' => 'money', 'direction' => 'higher', 'scored' => true],
-            ['key' => 'average_monthly_profit', 'label' => 'Resultado médio mensal', 'hint' => 'Resultado líquido dividido pelos meses com operações.', 'group' => 'Retorno', 'format' => 'money', 'direction' => 'higher', 'scored' => true],
+            ['key' => 'net_profit', 'label' => 'Resultado líquido', 'hint' => 'Soma do resultado líquido ponderado das estratégias ativas.', 'group' => 'Retorno', 'format' => 'money', 'direction' => 'higher', 'scored' => true],
             ['key' => 'average_trade', 'label' => 'Resultado médio por trade', 'hint' => 'Expectativa matemática por operação.', 'group' => 'Retorno', 'format' => 'money', 'direction' => 'higher', 'scored' => true],
             ['key' => 'profit_factor', 'label' => 'Profit factor', 'hint' => 'Lucro bruto dividido pelo prejuízo bruto.', 'group' => 'Retorno', 'format' => 'ratio', 'direction' => 'higher', 'scored' => true],
-            ['key' => 'payoff', 'label' => 'Relação ganho/perda', 'hint' => 'Ganho médio dividido pela perda média.', 'group' => 'Retorno', 'format' => 'ratio', 'direction' => 'higher', 'scored' => true],
+            ['key' => 'average_payoff', 'label' => 'Payoff médio', 'hint' => 'Ganho médio dividido pela perda média.', 'group' => 'Retorno', 'format' => 'ratio', 'direction' => 'higher', 'scored' => true],
 
-            ['key' => 'max_drawdown', 'label' => 'Drawdown máximo', 'hint' => 'Maior queda financeira a partir de um topo da curva.', 'group' => 'Risco', 'format' => 'money_negative', 'direction' => 'lower', 'scored' => true],
-            ['key' => 'max_drawdown_percent', 'label' => 'Drawdown máximo (%)', 'hint' => 'Maior queda percentual a partir de um topo da curva.', 'group' => 'Risco', 'format' => 'percent', 'direction' => 'lower', 'scored' => true],
+            ['key' => 'max_drawdown', 'label' => 'Drawdown máximo', 'hint' => 'Maior queda financeira a partir de um topo da curva consolidada.', 'group' => 'Risco', 'format' => 'money_negative', 'direction' => 'lower', 'scored' => true],
+            ['key' => 'max_drawdown_percent', 'label' => 'Drawdown máximo (%)', 'hint' => 'Maior queda percentual a partir de um topo.', 'group' => 'Risco', 'format' => 'percent', 'direction' => 'lower', 'scored' => true],
             ['key' => 'net_profit_to_drawdown', 'label' => 'Lucro / drawdown', 'hint' => 'Quantas vezes o resultado cobre o pior drawdown.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'higher', 'scored' => true],
-            ['key' => 'ulcer_index', 'label' => 'Ulcer index', 'hint' => 'Mede profundidade e duração dos drawdowns. Quanto menor, melhor.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'lower', 'scored' => true],
+            ['key' => 'ulcer_index', 'label' => 'Ulcer index', 'hint' => 'Profundidade e duração dos drawdowns. Quanto menor, melhor.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_losing_streak', 'label' => 'Maior sequência de perdas', 'hint' => 'Maior número de trades perdedores consecutivos.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
-            ['key' => 'max_days_without_new_high', 'label' => 'Dias sem romper topo', 'hint' => 'Maior intervalo sem nova máxima da curva de capital.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
+            ['key' => 'max_days_without_new_high', 'label' => 'Dias sem romper topo', 'hint' => 'Maior intervalo sem nova máxima da curva consolidada.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
 
             ['key' => 'win_rate', 'label' => 'Taxa de acerto', 'hint' => 'Percentual de trades com resultado positivo.', 'group' => 'Consistência', 'format' => 'percent', 'direction' => 'higher', 'scored' => true],
             ['key' => 'positive_months_percent', 'label' => 'Meses positivos', 'hint' => 'Percentual de meses com resultado positivo.', 'group' => 'Consistência', 'format' => 'percent', 'direction' => 'higher', 'scored' => true],
-            ['key' => 'equity_r2', 'label' => 'R² da curva', 'hint' => 'Aderência da curva de capital a uma reta. Quanto maior, mais suave.', 'group' => 'Consistência', 'format' => 'ratio_4', 'direction' => 'higher', 'scored' => true],
-            ['key' => 'max_winning_streak', 'label' => 'Maior sequência de ganhos', 'hint' => 'Maior número de trades vencedores consecutivos.', 'group' => 'Consistência', 'format' => 'integer', 'direction' => 'higher', 'scored' => false],
+            ['key' => 'equity_r2', 'label' => 'R² da curva', 'hint' => 'Aderência da curva consolidada a uma reta. Quanto maior, mais suave.', 'group' => 'Consistência', 'format' => 'ratio_4', 'direction' => 'higher', 'scored' => true],
 
-            ['key' => 'total_trades', 'label' => 'Total de trades', 'hint' => 'Quantidade de operações fechadas no período.', 'group' => 'Amostra', 'format' => 'integer', 'direction' => null],
+            ['key' => 'total_trades', 'label' => 'Total de trades', 'hint' => 'Operações fechadas das estratégias ativas.', 'group' => 'Amostra', 'format' => 'integer', 'direction' => null],
             ['key' => 'winning_trades', 'label' => 'Trades vencedores', 'hint' => 'Operações com resultado positivo.', 'group' => 'Amostra', 'format' => 'integer', 'direction' => null],
             ['key' => 'losing_trades', 'label' => 'Trades perdedores', 'hint' => 'Operações com resultado negativo.', 'group' => 'Amostra', 'format' => 'integer', 'direction' => null],
-            ['key' => 'months_with_trades', 'label' => 'Meses com operações', 'hint' => 'Meses em que a estratégia operou.', 'group' => 'Amostra', 'format' => 'integer', 'direction' => null],
-            ['key' => 'average_win', 'label' => 'Ganho médio', 'hint' => 'Resultado médio dos trades vencedores.', 'group' => 'Amostra', 'format' => 'money', 'direction' => 'higher', 'scored' => false],
-            ['key' => 'average_loss', 'label' => 'Perda média', 'hint' => 'Resultado médio dos trades perdedores.', 'group' => 'Amostra', 'format' => 'money', 'direction' => 'higher', 'scored' => false],
-            ['key' => 'best_trade', 'label' => 'Melhor trade', 'hint' => 'Maior lucro em uma única operação.', 'group' => 'Amostra', 'format' => 'money', 'direction' => 'higher', 'scored' => false],
-            ['key' => 'worst_trade', 'label' => 'Pior trade', 'hint' => 'Maior prejuízo em uma única operação.', 'group' => 'Amostra', 'format' => 'money', 'direction' => 'higher', 'scored' => false],
+            ['key' => 'months_with_trades', 'label' => 'Meses com operações', 'hint' => 'Meses em que o portfólio operou.', 'group' => 'Amostra', 'format' => 'integer', 'direction' => null],
+            ['key' => 'active_strategies_count', 'label' => 'Estratégias ativas', 'hint' => 'Estratégias habilitadas na composição.', 'group' => 'Amostra', 'format' => 'integer', 'direction' => null],
         ];
     }
 
     private function winner(mixed $firstValue, mixed $secondValue, string $direction): ?int
     {
-        // A null means the metric does not apply (no losses, no drawdown, no month),
-        // which cannot be ranked against a number.
         if ($firstValue === null || $secondValue === null) {
             return null;
         }
@@ -394,8 +224,6 @@ class StrategyComparisonService
     }
 
     /**
-     * Number of scored metrics each strategy wins.
-     *
      * @param  array<int, array<string, mixed>>  $rows
      * @return array{0: int, 1: int}
      */
@@ -421,16 +249,15 @@ class StrategyComparisonService
      */
     private function verdict(array $sides, array $rows): array
     {
-        $scoredRows = collect($rows)->filter(fn (array $row): bool => ($row['scored'] ?? false) === true);
-        $total = $scoredRows->count();
+        $total = collect($rows)->filter(fn (array $row): bool => ($row['scored'] ?? false) === true)->count();
         $firstWins = (int) $sides[0]['wins'];
         $secondWins = (int) $sides[1]['wins'];
 
-        if (! $sides[0]['metrics']['has_data'] || ! $sides[1]['metrics']['has_data']) {
+        if (! $sides[0]['has_data'] || ! $sides[1]['has_data']) {
             return [
                 'leader' => null,
                 'type' => 'neutral',
-                'message' => 'Uma das estratégias não possui trades fechados no período selecionado, então a comparação está incompleta.',
+                'message' => 'Um dos portfólios não possui trades fechados, então a comparação está incompleta.',
                 'first_wins' => $firstWins,
                 'second_wins' => $secondWins,
                 'total_metrics' => $total,
@@ -441,7 +268,7 @@ class StrategyComparisonService
             return [
                 'leader' => null,
                 'type' => 'neutral',
-                'message' => "Empate técnico: cada estratégia lidera {$firstWins} das {$total} métricas avaliadas.",
+                'message' => "Empate técnico: cada portfólio lidera {$firstWins} das {$total} métricas avaliadas.",
                 'first_wins' => $firstWins,
                 'second_wins' => $secondWins,
                 'total_metrics' => $total,
@@ -450,12 +277,11 @@ class StrategyComparisonService
 
         $leader = $firstWins > $secondWins ? 0 : 1;
         $leaderWins = max($firstWins, $secondWins);
-        $name = $sides[$leader]['name'];
 
         return [
             'leader' => $leader,
             'type' => 'success',
-            'message' => "{$name} lidera em {$leaderWins} das {$total} métricas avaliadas.",
+            'message' => "{$sides[$leader]['name']} lidera em {$leaderWins} das {$total} métricas avaliadas.",
             'first_wins' => $firstWins,
             'second_wins' => $secondWins,
             'total_metrics' => $total,
@@ -463,8 +289,6 @@ class StrategyComparisonService
     }
 
     /**
-     * Overlaid equity curves drawn on a shared time axis.
-     *
      * @param  array<string, mixed>  $first
      * @param  array<string, mixed>  $second
      * @param  array<int, array<string, mixed>>  $sides
@@ -473,8 +297,8 @@ class StrategyComparisonService
     private function chart(array $first, array $second, array $sides): array
     {
         $series = [
-            ['label' => $sides[0]['name'], 'color' => $sides[0]['color'], 'points' => $this->datedEquity($first['equity_curve'])],
-            ['label' => $sides[1]['name'], 'color' => $sides[1]['color'], 'points' => $this->datedEquity($second['equity_curve'])],
+            ['label' => $sides[0]['name'], 'color' => $sides[0]['color'], 'points' => $this->datedEquity($first['equity_curve'] ?? [])],
+            ['label' => $sides[1]['name'], 'color' => $sides[1]['color'], 'points' => $this->datedEquity($second['equity_curve'] ?? [])],
         ];
 
         $allPoints = array_merge(...array_column($series, 'points'));
@@ -487,17 +311,14 @@ class StrategyComparisonService
         $values = array_column($allPoints, 'equity');
         $minTimestamp = min($timestamps);
         $maxTimestamp = max($timestamps);
-        $minValue = min($values);
-        $maxValue = max($values);
-        $minValue = min($minValue, 0.0);
-        $maxValue = max($maxValue, 0.0);
+        $minValue = min(min($values), 0.0);
+        $maxValue = max(max($values), 0.0);
 
         if ($minValue === $maxValue) {
             $minValue -= 1;
             $maxValue += 1;
         }
 
-        // Small headroom so the curves never touch the top and bottom borders.
         $headroom = ($maxValue - $minValue) * 0.04;
         $minValue -= $headroom;
         $maxValue += $headroom;
@@ -569,8 +390,6 @@ class StrategyComparisonService
     }
 
     /**
-     * Keeps the curve shape while limiting the number of rendered points.
-     *
      * @param  array<int, array{timestamp: int, equity: float, date: string}>  $points
      * @return array<int, array{timestamp: int, equity: float, date: string}>
      */
@@ -659,16 +478,14 @@ class StrategyComparisonService
     }
 
     /**
-     * Year by year result of both strategies.
-     *
      * @param  array<string, mixed>  $first
      * @param  array<string, mixed>  $second
      * @return array<int, array<string, mixed>>
      */
     private function annualComparison(array $first, array $second): array
     {
-        $firstYears = collect($first['monthly_performance'])->keyBy('year');
-        $secondYears = collect($second['monthly_performance'])->keyBy('year');
+        $firstYears = collect($first['monthly_performance'] ?? [])->keyBy('year');
+        $secondYears = collect($second['monthly_performance'] ?? [])->keyBy('year');
 
         return $firstYears->keys()
             ->merge($secondYears->keys())
@@ -691,63 +508,88 @@ class StrategyComparisonService
     }
 
     /**
-     * How many periods each strategy came out ahead.
+     * Bucket a portfolio's consolidated (weighted) trades into periodic P&L totals.
      *
-     * @param  Collection<int, Trade>  $firstTrades
-     * @param  Collection<int, Trade>  $secondTrades
+     * @param  array<int, array<string, mixed>>  $trades
+     * @return array<string, float>
+     */
+    private function periodSeriesFromTrades(array $trades, string $period): array
+    {
+        $series = [];
+
+        foreach ($trades as $trade) {
+            $key = $this->periodKey($trade['exit_time'] ?? null, $period);
+
+            if ($key === null) {
+                continue;
+            }
+
+            $series[$key] = ($series[$key] ?? 0.0) + (float) ($trade['net_profit'] ?? 0);
+        }
+
+        ksort($series);
+
+        return array_map(fn (float $value): float => round($value, 2), $series);
+    }
+
+    /**
+     * @param  array<string, float>  $firstSeries
+     * @param  array<string, float>  $secondSeries
      * @return array<string, mixed>
      */
-    private function headToHead(Collection $firstTrades, Collection $secondTrades, string $period): array
+    private function headToHead(array $firstSeries, array $secondSeries): array
     {
-        $keys = $this->periodKeys($firstTrades, $secondTrades, $period);
-        $firstSeries = $this->series($firstTrades, $keys, $period);
-        $secondSeries = $this->series($secondTrades, $keys, $period);
+        $keys = array_values(array_unique(array_merge(array_keys($firstSeries), array_keys($secondSeries))));
+        sort($keys);
+
         $firstWins = 0;
         $secondWins = 0;
         $ties = 0;
 
-        foreach (array_keys($keys) as $index) {
-            $difference = round($firstSeries[$index] - $secondSeries[$index], 2);
+        foreach ($keys as $key) {
+            $difference = round(($firstSeries[$key] ?? 0.0) - ($secondSeries[$key] ?? 0.0), 2);
 
             if ($difference > 0) {
                 $firstWins++;
-
-                continue;
-            }
-
-            if ($difference < 0) {
+            } elseif ($difference < 0) {
                 $secondWins++;
-
-                continue;
+            } else {
+                $ties++;
             }
-
-            $ties++;
         }
 
+        $count = count($keys);
+
         return [
-            'period_count' => count($keys),
+            'period_count' => $count,
             'first_wins' => $firstWins,
             'second_wins' => $secondWins,
             'ties' => $ties,
-            'first_win_rate' => count($keys) > 0 ? round(($firstWins / count($keys)) * 100, 2) : 0.0,
-            'second_win_rate' => count($keys) > 0 ? round(($secondWins / count($keys)) * 100, 2) : 0.0,
+            'first_win_rate' => $count > 0 ? round(($firstWins / $count) * 100, 2) : 0.0,
+            'second_win_rate' => $count > 0 ? round(($secondWins / $count) * 100, 2) : 0.0,
         ];
     }
 
     /**
-     * Correlation between both strategies over the selected period.
-     *
-     * @param  Collection<int, Trade>  $firstTrades
-     * @param  Collection<int, Trade>  $secondTrades
+     * @param  array<string, float>  $firstSeries
+     * @param  array<string, float>  $secondSeries
      * @param  array<int, array<string, mixed>>  $sides
      * @return array<string, mixed>
      */
-    private function correlation(Collection $firstTrades, Collection $secondTrades, string $period, array $sides): array
+    private function correlation(array $firstSeries, array $secondSeries, array $sides, string $period): array
     {
-        $keys = $this->periodKeys($firstTrades, $secondTrades, $period);
-        $firstSeries = $this->series($firstTrades, $keys, $period);
-        $secondSeries = $this->series($secondTrades, $keys, $period);
-        $value = $this->pearson($firstSeries, $secondSeries);
+        $keys = array_values(array_unique(array_merge(array_keys($firstSeries), array_keys($secondSeries))));
+        sort($keys);
+
+        $first = [];
+        $second = [];
+
+        foreach ($keys as $key) {
+            $first[] = $firstSeries[$key] ?? 0.0;
+            $second[] = $secondSeries[$key] ?? 0.0;
+        }
+
+        $value = $this->pearson($first, $second);
 
         return [
             'value' => $value,
@@ -755,52 +597,11 @@ class StrategyComparisonService
             'period_count' => count($keys),
             'has_enough_data' => count($keys) >= 2 && $value !== null,
             'class' => $value === null ? 'mqa-correlation-empty' : $this->correlationClass($value),
-            'description' => $value === null
-                ? 'Dados insuficientes para calcular a correlação.'
-                : $this->correlationDescription($value),
+            'description' => $value === null ? 'Dados insuficientes para calcular a correlação.' : $this->correlationDescription($value),
             'message' => $value === null
                 ? "Não há períodos suficientes em comum entre {$sides[0]['name']} e {$sides[1]['name']}."
                 : $this->correlationMessage($value, $sides),
         ];
-    }
-
-    /**
-     * @param  Collection<int, Trade>  $firstTrades
-     * @param  Collection<int, Trade>  $secondTrades
-     * @return array<int, string>
-     */
-    private function periodKeys(Collection $firstTrades, Collection $secondTrades, string $period): array
-    {
-        return $firstTrades->merge($secondTrades)
-            ->map(fn (Trade $trade): ?string => $this->periodKey($trade->exit_time, $period))
-            ->filter()
-            ->unique()
-            ->sort()
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @param  Collection<int, Trade>  $trades
-     * @param  array<int, string>  $keys
-     * @return array<int, float>
-     */
-    private function series(Collection $trades, array $keys, string $period): array
-    {
-        $series = array_fill(0, max(count($keys), 1), 0.0);
-        $indexes = array_flip($keys);
-
-        foreach ($trades as $trade) {
-            $key = $this->periodKey($trade->exit_time, $period);
-
-            if ($key === null || ! array_key_exists($key, $indexes)) {
-                continue;
-            }
-
-            $series[$indexes[$key]] += (float) $trade->net_profit;
-        }
-
-        return array_map(fn (float $value): float => round($value, 2), array_slice($series, 0, count($keys)));
     }
 
     /**
@@ -871,45 +672,151 @@ class StrategyComparisonService
         $names = "{$sides[0]['name']} e {$sides[1]['name']}";
 
         return match (true) {
-            abs($correlation) <= 0.20 => "{$names} têm comportamentos praticamente independentes, o que favorece a combinação em um portfólio.",
-            $correlation < -0.20 => "{$names} tendem a se mover em direções opostas, o que suaviza a curva quando combinadas.",
-            abs($correlation) <= 0.40 => "{$names} apresentam alguma sobreposição de comportamento. Vale acompanhar a combinação.",
-            abs($correlation) <= 0.70 => "{$names} têm correlação alta e tendem a ganhar e perder juntas.",
-            default => "{$names} são muito redundantes entre si. Manter as duas no mesmo portfólio agrega pouca diversificação.",
+            abs($correlation) <= 0.20 => "{$names} têm comportamentos praticamente independentes — combiná-los tende a suavizar a curva.",
+            $correlation < -0.20 => "{$names} tendem a se mover em direções opostas, o que reduz o drawdown quando somados.",
+            abs($correlation) <= 0.40 => "{$names} têm alguma sobreposição de comportamento. Vale acompanhar de perto.",
+            abs($correlation) <= 0.70 => "{$names} têm correlação alta e tendem a ganhar e perder juntos.",
+            default => "{$names} são muito redundantes entre si. Manter os dois entrega pouca diversificação extra.",
         };
     }
 
     /**
-     * Result of running both strategies together.
+     * Effect of running the enabled strategies of both portfolios together.
      *
-     * @param  array<string, mixed>  $first
-     * @param  array<string, mixed>  $second
-     * @param  array<string, mixed>  $combined
+     * @param  array<string, mixed>  $firstMetrics
+     * @param  array<string, mixed>  $secondMetrics
      * @return array<string, mixed>
      */
-    private function combined(array $first, array $second, array $combined): array
+    private function combined(Portfolio $first, Portfolio $second, array $firstMetrics, array $secondMetrics): array
     {
-        $drawdownSum = round((float) $first['max_drawdown'] + (float) $second['max_drawdown'], 2);
-        $drawdownReduction = round($drawdownSum - (float) $combined['max_drawdown'], 2);
+        $weights = $this->mergedWeights($first, $second);
+        $baseline = (float) ($first->initial_balance ?? 0) + (float) ($second->initial_balance ?? 0);
+        $bundle = $this->weightedBundleMetrics($weights, $baseline);
+
+        $drawdownSum = round((float) ($firstMetrics['max_drawdown'] ?? 0) + (float) ($secondMetrics['max_drawdown'] ?? 0), 2);
+        $drawdownReduction = round($drawdownSum - (float) $bundle['max_drawdown'], 2);
         $reductionPercent = $drawdownSum > 0 ? round(($drawdownReduction / $drawdownSum) * 100, 2) : 0.0;
 
-        return [
-            'has_data' => $combined['has_data'],
-            'net_profit' => $combined['net_profit'],
-            'max_drawdown' => $combined['max_drawdown'],
-            'max_drawdown_percent' => $combined['max_drawdown_percent'],
-            'profit_factor' => $combined['profit_factor'],
-            'net_profit_to_drawdown' => $combined['net_profit_to_drawdown'],
-            'win_rate' => $combined['win_rate'],
-            'total_trades' => $combined['total_trades'],
-            'positive_months_percent' => $combined['positive_months_percent'],
-            'equity_r2' => $combined['equity_r2'],
-            'ulcer_index' => $combined['ulcer_index'],
+        return array_merge($bundle, [
             'drawdown_sum' => $drawdownSum,
             'drawdown_reduction' => $drawdownReduction,
             'drawdown_reduction_percent' => $reductionPercent,
-            'best_individual_drawdown' => round(min((float) $first['max_drawdown'], (float) $second['max_drawdown']), 2),
-            'best_individual_net_profit' => round(max((float) $first['net_profit'], (float) $second['net_profit']), 2),
+            'best_individual_drawdown' => round(min((float) ($firstMetrics['max_drawdown'] ?? 0), (float) ($secondMetrics['max_drawdown'] ?? 0)), 2),
+            'best_individual_net_profit' => round(max((float) ($firstMetrics['net_profit'] ?? 0), (float) ($secondMetrics['net_profit'] ?? 0)), 2),
+        ]);
+    }
+
+    /**
+     * Union of the enabled strategies of both portfolios; a strategy present on both
+     * sides gets the mean of its two weights.
+     *
+     * @return array<int, float>
+     */
+    private function mergedWeights(Portfolio $first, Portfolio $second): array
+    {
+        $collect = static function (Portfolio $portfolio): array {
+            return $portfolio->portfolioStrategies()
+                ->where('enabled', true)
+                ->get(['strategy_id', 'weight'])
+                ->mapWithKeys(fn ($row): array => [(int) $row->strategy_id => (float) ($row->weight ?? 1)])
+                ->all();
+        };
+
+        $firstWeights = $collect($first);
+        $secondWeights = $collect($second);
+        $merged = [];
+
+        foreach (array_unique(array_merge(array_keys($firstWeights), array_keys($secondWeights))) as $strategyId) {
+            $values = array_values(array_filter([
+                $firstWeights[$strategyId] ?? null,
+                $secondWeights[$strategyId] ?? null,
+            ], fn (mixed $value): bool => $value !== null));
+
+            $merged[(int) $strategyId] = count($values) > 0 ? array_sum($values) / count($values) : 1.0;
+        }
+
+        return $merged;
+    }
+
+    /**
+     * Single-pass weighted equity reconstruction for the combined portfolio.
+     *
+     * @param  array<int, float>  $weights
+     * @return array<string, mixed>
+     */
+    private function weightedBundleMetrics(array $weights, float $baseline): array
+    {
+        $trades = Trade::query()
+            ->whereIn('strategy_id', array_keys($weights))
+            ->whereNotNull('exit_time')
+            ->orderBy('exit_time')
+            ->orderBy('id')
+            ->get(['id', 'strategy_id', 'exit_time', 'net_profit']);
+
+        if ($trades->isEmpty()) {
+            return [
+                'has_data' => false,
+                'net_profit' => 0.0,
+                'max_drawdown' => 0.0,
+                'max_drawdown_percent' => 0.0,
+                'profit_factor' => null,
+                'net_profit_to_drawdown' => null,
+                'win_rate' => 0.0,
+                'total_trades' => 0,
+                'positive_months_percent' => 0.0,
+                'equity_r2' => 0.0,
+                'ulcer_index' => 0.0,
+            ];
+        }
+
+        $cum = 0.0;
+        $curve = [];
+        $months = [];
+        $grossProfit = 0.0;
+        $grossLoss = 0.0;
+        $wins = 0;
+        $count = 0;
+
+        foreach ($trades as $trade) {
+            $weighted = (float) $trade->net_profit * ($weights[(int) $trade->strategy_id] ?? 0.0);
+            $cum += $weighted;
+            $curve[] = ['equity' => round($cum, 2)];
+            $count++;
+
+            if ($weighted > 0) {
+                $grossProfit += $weighted;
+                $wins++;
+            } elseif ($weighted < 0) {
+                $grossLoss += abs($weighted);
+            }
+
+            $monthKey = $trade->exit_time?->format('Y-m');
+
+            if ($monthKey !== null) {
+                $months[$monthKey] = ($months[$monthKey] ?? 0.0) + $weighted;
+            }
+        }
+
+        $drawdown = $this->drawdownCalculator->calculate($curve, $baseline);
+        $ulcer = $this->ulcerIndexCalculator->calculate($curve, $baseline);
+        $equityR2 = $this->linearRegressionService->calculateR2(array_column($curve, 'equity'));
+        $netProfit = round($cum, 2);
+        $absDrawdown = abs((float) $drawdown['max_drawdown']);
+        $monthsWithTrades = count($months);
+        $positiveMonths = count(array_filter($months, fn (float $value): bool => $value > 0));
+
+        return [
+            'has_data' => true,
+            'net_profit' => $netProfit,
+            'max_drawdown' => (float) $drawdown['max_drawdown'],
+            'max_drawdown_percent' => (float) $drawdown['max_drawdown_percent'],
+            'profit_factor' => $grossLoss > 0 ? round($grossProfit / $grossLoss, 2) : null,
+            'net_profit_to_drawdown' => $absDrawdown > 0 ? round($netProfit / $absDrawdown, 2) : null,
+            'win_rate' => $count > 0 ? round(($wins / $count) * 100, 2) : 0.0,
+            'total_trades' => $count,
+            'positive_months_percent' => $monthsWithTrades > 0 ? round(($positiveMonths / $monthsWithTrades) * 100, 2) : 0.0,
+            'equity_r2' => $equityR2,
+            'ulcer_index' => $ulcer,
         ];
     }
 

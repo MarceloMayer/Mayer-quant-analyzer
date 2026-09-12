@@ -3,12 +3,14 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Resources\Portfolios\PortfolioResource;
+use App\Jobs\AnalyzePortfolioCombinationsJob;
 use App\Models\Portfolio;
 use App\Models\PortfolioStrategy;
 use App\Models\Strategy;
 use App\Services\Portfolio\PortfolioCombinationAnalyzerService;
 use App\Services\Portfolio\PortfolioCombinationGeneratorService;
 use BackedEnum;
+use Filament\Actions\Action as NotificationAction;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\View;
@@ -17,6 +19,7 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 
 class PortfolioCombinationAnalyzer extends Page
@@ -66,6 +69,21 @@ class PortfolioCombinationAnalyzer extends Page
     public int $resultsPerPage = 25;
 
     public int $currentPage = 1;
+
+    // --- Queued analysis / progress state ---
+    public bool $isRunning = false;
+
+    public int $progressDone = 0;
+
+    public int $progressTotal = 0;
+
+    public ?string $analysisId = null;
+
+    // --- Inline curve preview (no persistence) ---
+    /** @var array<string, mixed> */
+    public array $preview = [];
+
+    public ?string $previewHash = null;
 
     // --- Computed ---
 
@@ -178,6 +196,14 @@ class PortfolioCombinationAnalyzer extends Page
             'sortColumn' => $this->sortColumn,
             'sortDirection' => $this->sortDirection,
             'assetOptions' => Strategy::assetOptions(),
+            'isRunning' => $this->isRunning,
+            'progressDone' => $this->progressDone,
+            'progressTotal' => $this->progressTotal,
+            'progressPercent' => $this->progressTotal > 0
+                ? min(100, (int) round(($this->progressDone / $this->progressTotal) * 100))
+                : 0,
+            'preview' => $this->preview,
+            'previewHash' => $this->previewHash,
         ];
     }
 
@@ -256,6 +282,7 @@ class PortfolioCombinationAnalyzer extends Page
         $this->isAnalyzed = false;
         $this->selectedToSave = [];
         $this->currentPage = 1;
+        $this->closePreview();
 
         $this->selectedStrategyIds = collect($this->selectedStrategyIds)
             ->map(fn (mixed $strategyId): int => (int) $strategyId)
@@ -309,23 +336,86 @@ class PortfolioCombinationAnalyzer extends Page
             return;
         }
 
-        // Large combination counts (now permitted up to maxCombinations) can take longer
-        // than the default PHP request timeout to score; lift it for this action only.
-        set_time_limit(300);
+        // The scoring runs off the web request as a queued job; the page polls
+        // pollAnalysis() for progress and picks up the ranking once it is ready.
+        $this->analysisId = (string) Str::uuid();
+        $this->isRunning = true;
+        $this->progressDone = 0;
+        $this->progressTotal = $count;
 
-        $generator = app(PortfolioCombinationGeneratorService::class);
-        $analyzer = app(PortfolioCombinationAnalyzerService::class);
+        Cache::forget($this->progressCacheKey());
+        Cache::forget($this->cancelCacheKey());
 
-        $combinations = $generator->generate($this->selectedStrategyIds, $this->strategiesPerPortfolio);
+        AnalyzePortfolioCombinationsJob::dispatch(
+            (int) auth()->id(),
+            $this->getId(),
+            $this->analysisId,
+            $this->selectedStrategyIds,
+            $this->strategiesPerPortfolio,
+            [
+                'initial_balance' => $this->initialBalance,
+                'start_date' => $this->startDate,
+                'end_date' => $this->endDate,
+            ],
+        );
 
-        $results = $analyzer->analyze($combinations, [
-            'initial_balance' => $this->initialBalance,
-            'start_date' => $this->startDate,
-            'end_date' => $this->endDate,
-        ]);
+        // Reconcile immediately so a sync queue (or a very fast job) doesn't leave the
+        // page stuck on "0%".
+        $this->pollAnalysis();
+    }
 
-        $this->setAnalysisResults($results);
-        $this->isAnalyzed = true;
+    public function pollAnalysis(): void
+    {
+        if (! $this->isRunning) {
+            return;
+        }
+
+        $progress = Cache::get($this->progressCacheKey());
+
+        if (! is_array($progress) || ($progress['analysis_id'] ?? null) !== $this->analysisId) {
+            return;
+        }
+
+        $this->progressTotal = (int) ($progress['total'] ?? $this->progressTotal);
+        $this->progressDone = (int) ($progress['done'] ?? $this->progressDone);
+
+        $status = $progress['status'] ?? 'running';
+
+        if ($status === 'done') {
+            $this->isRunning = false;
+            $this->isAnalyzed = true;
+            $this->resultsCount = (int) ($progress['count'] ?? count($this->getAnalysisResults()));
+            $this->currentPage = 1;
+            Cache::forget($this->progressCacheKey());
+
+            return;
+        }
+
+        if ($status === 'failed') {
+            $this->isRunning = false;
+            $this->errorMessage = $progress['message'] ?? 'Falha ao processar a análise.';
+            Cache::forget($this->progressCacheKey());
+
+            return;
+        }
+
+        if ($status === 'cancelled') {
+            $this->isRunning = false;
+            Cache::forget($this->progressCacheKey());
+        }
+    }
+
+    public function cancelAnalysis(): void
+    {
+        Cache::put($this->cancelCacheKey(), true, now()->addHour());
+        $this->isRunning = false;
+        $this->progressDone = 0;
+        $this->progressTotal = 0;
+
+        Notification::make()
+            ->title('Análise cancelada.')
+            ->warning()
+            ->send();
     }
 
     public function saveSingle(string $hash): void
@@ -339,10 +429,24 @@ class PortfolioCombinationAnalyzer extends Page
         $saved = $this->persistPortfolio($result);
 
         if ($saved) {
-            Notification::make()
+            $portfolio = Portfolio::query()
+                ->where('user_id', auth()->id())
+                ->where('combination_hash', $hash)
+                ->first();
+
+            $notification = Notification::make()
                 ->title('Portfólio salvo com sucesso!')
-                ->success()
-                ->send();
+                ->success();
+
+            if ($portfolio !== null) {
+                $notification->actions([
+                    NotificationAction::make('ver')
+                        ->label('Abrir resultados')
+                        ->url(PortfolioResource::getUrl('results', ['record' => $portfolio->id]), shouldOpenInNewTab: true),
+                ]);
+            }
+
+            $notification->send();
         } else {
             Notification::make()
                 ->title('Este portfólio já foi salvo anteriormente.')
@@ -351,7 +455,7 @@ class PortfolioCombinationAnalyzer extends Page
         }
     }
 
-    public function viewResults(string $hash): void
+    public function previewCombination(string $hash): void
     {
         $result = collect($this->getAnalysisResults())->firstWhere('combination_hash', $hash);
 
@@ -359,24 +463,21 @@ class PortfolioCombinationAnalyzer extends Page
             return;
         }
 
-        $portfolio = Portfolio::query()
-            ->where('user_id', auth()->id())
-            ->where('combination_hash', $hash)
-            ->first();
+        $this->previewHash = $hash;
+        $this->preview = app(PortfolioCombinationAnalyzerService::class)->buildCurve(
+            (array) ($result['strategy_ids'] ?? []),
+            [
+                'initial_balance' => $this->initialBalance,
+                'start_date' => $this->startDate,
+                'end_date' => $this->endDate,
+            ],
+        );
+    }
 
-        if ($portfolio === null) {
-            $this->persistPortfolio($result);
-            $portfolio = Portfolio::query()
-                ->where('user_id', auth()->id())
-                ->where('combination_hash', $hash)
-                ->first();
-        }
-
-        if ($portfolio === null) {
-            return;
-        }
-
-        $this->redirect(PortfolioResource::getUrl('results', ['record' => $portfolio->id]));
+    public function closePreview(): void
+    {
+        $this->preview = [];
+        $this->previewHash = null;
     }
 
     public function saveSelected(): void
@@ -510,6 +611,12 @@ class PortfolioCombinationAnalyzer extends Page
         $this->selectedToSave = [];
         $this->errorMessage = null;
         $this->currentPage = 1;
+        $this->isRunning = false;
+        $this->progressDone = 0;
+        $this->progressTotal = 0;
+        $this->analysisId = null;
+        Cache::forget($this->progressCacheKey());
+        $this->closePreview();
     }
 
     /**
@@ -538,10 +645,21 @@ class PortfolioCombinationAnalyzer extends Page
 
     /**
      * Scoped to the current user and this specific component instance, so results from one
-     * analysis don't leak into another tab/session while this page is open.
+     * analysis don't leak into another tab/session while this page is open. Shared with
+     * AnalyzePortfolioCombinationsJob, which writes the ranking here.
      */
     private function analysisResultsCacheKey(): string
     {
-        return 'portfolio_combo_results:'.auth()->id().':'.$this->getId();
+        return AnalyzePortfolioCombinationsJob::resultsCacheKey((int) auth()->id(), $this->getId());
+    }
+
+    private function progressCacheKey(): string
+    {
+        return AnalyzePortfolioCombinationsJob::progressCacheKey((int) auth()->id(), $this->getId());
+    }
+
+    private function cancelCacheKey(): string
+    {
+        return AnalyzePortfolioCombinationsJob::cancelCacheKey((int) auth()->id(), $this->getId());
     }
 }

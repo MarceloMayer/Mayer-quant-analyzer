@@ -5,6 +5,7 @@ namespace App\Services\Imports;
 use App\Models\Strategy;
 use App\Models\StrategyImport;
 use App\Models\Trade;
+use App\Services\Portfolio\PortfolioMetricsCache;
 use App\Services\Trading\StrategyBacktestExecutionUpsertService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
@@ -17,6 +18,7 @@ class TradeImportService
         private readonly TradeNormalizer $normalizer,
         private readonly Mt5MultipleReportImportService $multipleReportImportService,
         private readonly StrategyBacktestExecutionUpsertService $executionUpsert,
+        private readonly PortfolioMetricsCache $portfolioMetricsCache,
     ) {}
 
     /**
@@ -92,6 +94,10 @@ class TradeImportService
                 'end_date' => $periodEnd?->toDateString(),
             ], $executionData);
         });
+
+        if ($importedRows > 0) {
+            $this->portfolioMetricsCache->forgetForStrategy($strategy->id);
+        }
 
         return [
             'total_rows' => $totalRows,

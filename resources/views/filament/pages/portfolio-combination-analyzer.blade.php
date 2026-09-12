@@ -289,6 +289,149 @@
     .pca-analysis-params, .pca-stat-grid { grid-template-columns: 1fr; }
     .pca-card-actions > * { flex: 1 1 auto; }
 }
+
+/* ---------- Results + collapsible column guide ---------- */
+[x-cloak] { display: none !important; }
+
+.pca-results-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.5rem;
+}
+.pca-results-main { flex: 1 1 auto; min-width: 0; }
+
+.pca-guide {
+    flex: 0 0 300px;
+    width: 300px;
+    align-self: flex-start;
+    position: sticky;
+    top: 4.25rem;
+    max-height: calc(100vh - 5.5rem);
+    display: flex;
+    flex-direction: column;
+    transition: flex-basis .2s ease, width .2s ease;
+}
+.pca-guide-is-collapsed .pca-guide {
+    flex-basis: 3rem;
+    width: 3rem;
+}
+
+.pca-guide-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: .875rem 1rem;
+    border-bottom: 1px solid rgb(229 231 235);
+    flex-shrink: 0;
+}
+.dark .pca-guide-header { border-color: rgb(31 41 55); }
+.pca-guide-is-collapsed .pca-guide-header {
+    justify-content: center;
+    padding: .5rem;
+    border-bottom: none;
+}
+
+.pca-guide-toggle {
+    flex-shrink: 0;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgb(229 231 235);
+    border-radius: .375rem;
+    background: rgb(249 250 251);
+    color: rgb(107 114 128);
+    font-size: .875rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .1s, color .1s;
+}
+.pca-guide-toggle:hover { background: rgb(243 244 246); color: rgb(59 130 246); }
+.dark .pca-guide-toggle { border-color: rgb(55 65 81); background: rgb(31 41 55); color: rgb(156 163 175); }
+.dark .pca-guide-toggle:hover { background: rgb(55 65 81); color: rgb(96 165 250); }
+
+.pca-guide-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 1rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.pca-guide-rail {
+    flex: 1 1 auto;
+    min-height: 7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 1rem .25rem;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+}
+.pca-guide-rail span {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: .75rem;
+    font-weight: 650;
+    letter-spacing: .05em;
+    color: rgb(107 114 128);
+    white-space: nowrap;
+}
+.pca-guide-rail:hover span { color: rgb(59 130 246); }
+.dark .pca-guide-rail span { color: rgb(156 163 175); }
+
+@media (max-width: 1024px) {
+    .pca-results-row { flex-direction: column; }
+    .pca-guide,
+    .pca-guide-is-collapsed .pca-guide {
+        position: static;
+        width: 100%;
+        flex-basis: auto;
+        max-height: none;
+    }
+    .pca-guide-is-collapsed .pca-guide-header {
+        justify-content: space-between;
+        padding: .875rem 1rem;
+    }
+    .pca-guide-rail { min-height: 0; padding: .75rem; }
+    .pca-guide-rail span { writing-mode: horizontal-tb; transform: none; }
+}
+
+/* ---------- Progress (queued analysis) ---------- */
+.pca-progress { margin-top: 1rem; padding: .875rem 1rem; border: 1px solid rgb(147 197 253); background: rgb(239 246 255); border-radius: .5rem; }
+.dark .pca-progress { border-color: rgb(30 58 138); background: rgb(30 58 138 / .25); }
+.pca-progress-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.pca-progress-label { font-size: .8125rem; color: rgb(29 78 216); }
+.dark .pca-progress-label { color: rgb(147 197 253); }
+.pca-progress-track { margin-top: .625rem; height: .5rem; border-radius: 9999px; background: rgb(191 219 254); overflow: hidden; }
+.dark .pca-progress-track { background: rgb(30 58 138 / .5); }
+.pca-progress-fill { height: 100%; border-radius: 9999px; background: rgb(59 130 246); transition: width .4s ease; }
+.pca-progress-hint { margin: .5rem 0 0; font-size: .75rem; color: rgb(107 114 128); }
+.dark .pca-progress-hint { color: rgb(156 163 175); }
+
+/* ---------- Sparkline column ---------- */
+.pca-spark { width: 72px; height: 24px; display: block; }
+.pca-spark path { fill: none; stroke: rgb(59 130 246); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.pca-table tbody tr { cursor: pointer; }
+.pca-table tbody tr.pca-row-active td { background: rgb(239 246 255); }
+.dark .pca-table tbody tr.pca-row-active td { background: rgb(30 58 138 / .3); }
+
+/* ---------- Curve preview panel ---------- */
+.pca-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.pca-preview-chips { display: flex; gap: .625rem; flex-wrap: wrap; margin: .75rem 0 1rem; }
+.pca-preview-chip { border: 1px solid rgb(229 231 235); border-radius: .5rem; padding: .5rem .75rem; min-width: 8rem; }
+.dark .pca-preview-chip { border-color: rgb(55 65 81); }
+.pca-preview-chip-label { font-size: .6875rem; color: rgb(107 114 128); }
+.dark .pca-preview-chip-label { color: rgb(156 163 175); }
+.pca-preview-chip-value { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pca-preview-svg { width: 100%; height: 220px; display: block; }
+.pca-preview-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 </style>
 @endonce
 
@@ -484,21 +627,58 @@
                     class="pca-btn pca-btn-primary"
                     wire:click="analyze"
                     wire:loading.attr="disabled"
-                    @if ($exceedsLimit || count($selectedStrategyIds) < 2 || $combinationsCount === 0) disabled @endif
+                    @if ($isRunning || $exceedsLimit || count($selectedStrategyIds) < 2 || $combinationsCount === 0) disabled @endif
                 >
                     <span wire:loading.remove wire:target="analyze">
                         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:inline;vertical-align:-.15em;margin-right:.2rem"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
                         Analisar Portfólios
                     </span>
-                    <span wire:loading wire:target="analyze">Analisando...</span>
+                    <span wire:loading wire:target="analyze">Enfileirando...</span>
                 </button>
             </div>
+
+            @if ($isRunning)
+                <div class="pca-progress" wire:poll.1500ms="pollAnalysis">
+                    <div class="pca-progress-head">
+                        <span class="pca-progress-label">
+                            Analisando combinações...
+                            <strong>{{ number_format($progressDone, 0, ',', '.') }}</strong>
+                            de
+                            <strong>{{ number_format($progressTotal, 0, ',', '.') }}</strong>
+                            ({{ $progressPercent }}%)
+                        </span>
+                        <button class="pca-btn-ghost" wire:click="cancelAnalysis">Cancelar</button>
+                    </div>
+                    <div class="pca-progress-track">
+                        <div class="pca-progress-fill" style="width: {{ max(3, $progressPercent) }}%;"></div>
+                    </div>
+                    <p class="pca-progress-hint">
+                        O processamento roda em segundo plano (fila). Você pode continuar usando o sistema; o ranking aparece aqui ao terminar.
+                    </p>
+                </div>
+            @endif
         </div>
     </div>
 
-    {{-- ====================== RESULTS ====================== --}}
+    {{-- ====================== RESULTS + COLUMN GUIDE ====================== --}}
     @if ($isAnalyzed)
-        <div class="pca-card">
+        <div
+            class="pca-results-row"
+            x-data="{
+                guideOpen: true,
+                init() {
+                    try {
+                        const v = localStorage.getItem('pca_guide_open');
+                        if (v !== null) this.guideOpen = v === '1';
+                    } catch (e) {}
+                    this.$watch('guideOpen', val => {
+                        try { localStorage.setItem('pca_guide_open', val ? '1' : '0'); } catch (e) {}
+                    });
+                },
+            }"
+            :class="{ 'pca-guide-is-collapsed': ! guideOpen }"
+        >
+        <div class="pca-card pca-results-main">
             <div class="pca-card-header">
                 <span class="pca-card-title">
                     Ranking de Portfólios
@@ -526,6 +706,7 @@
                                 </th>
                                 <th style="width:2.5rem;">#</th>
                                 <th>Estratégias</th>
+                                <th style="width:5rem;">Curva</th>
                                 @foreach ($columns as $col => $label)
                                     <th
                                         class="sortable {{ $sortColumn === $col ? 'sort-active' : '' }}"
@@ -555,9 +736,24 @@
                                         ? $names
                                         : array_slice($names, 0, 2);
                                     $extraCount = count($names) > 3 ? count($names) - 2 : 0;
+
+                                    $spark = (array) ($result['spark'] ?? []);
+                                    $sparkPath = '';
+                                    if (count($spark) >= 2) {
+                                        $stepX = 100 / (count($spark) - 1);
+                                        foreach (array_values($spark) as $si => $sv) {
+                                            $x = round($si * $stepX, 2);
+                                            $y = round(28 - ((float) $sv * 24) - 2, 2);
+                                            $sparkPath .= ($si === 0 ? 'M' : 'L') . $x . ',' . $y . ' ';
+                                        }
+                                    }
                                 @endphp
-                                <tr>
-                                    <td style="text-align:center;">
+                                <tr
+                                    wire:click="previewCombination('{{ $hash }}')"
+                                    wire:key="row-{{ $hash }}"
+                                    class="{{ $previewHash === $hash ? 'pca-row-active' : '' }}"
+                                >
+                                    <td style="text-align:center;" @click.stop>
                                         <input
                                             type="checkbox"
                                             style="width:1rem;height:1rem;accent-color:rgb(59 130 246);"
@@ -575,6 +771,15 @@
                                                 <span class="pca-tag" style="background:rgb(243 244 246);color:rgb(107 114 128);">+{{ $extraCount }}</span>
                                             @endif
                                         </div>
+                                    </td>
+                                    <td>
+                                        @if ($sparkPath !== '')
+                                            <svg class="pca-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+                                                <path d="{{ $sparkPath }}" />
+                                            </svg>
+                                        @else
+                                            <span style="color:rgb(156 163 175);font-size:.75rem;">—</span>
+                                        @endif
                                     </td>
 
                                     {{-- Score --}}
@@ -622,18 +827,13 @@
                                     <td style="text-align:center;">{{ number_format($result['total_trades'], 0, ',', '.') }}</td>
 
                                     {{-- Ações --}}
-                                    <td>
+                                    <td @click.stop>
                                         <div style="display:flex;gap:.375rem;">
                                             <button
-                                                class="pca-btn pca-btn-primary pca-btn-sm"
-                                                wire:click="viewResults('{{ $hash }}')"
-                                                wire:loading.attr="disabled"
-                                                wire:target="viewResults('{{ $hash }}')"
-                                                title="Ver resultados completos"
-                                            >
-                                                <span wire:loading.remove wire:target="viewResults('{{ $hash }}')">Ver</span>
-                                                <span wire:loading wire:target="viewResults('{{ $hash }}')">...</span>
-                                            </button>
+                                                class="pca-btn pca-btn-ghost pca-btn-sm"
+                                                wire:click="previewCombination('{{ $hash }}')"
+                                                title="Ver curva de capital e drawdown"
+                                            >Prever</button>
                                             <button
                                                 class="pca-btn pca-btn-success pca-btn-sm"
                                                 wire:click="saveSingle('{{ $hash }}')"
@@ -649,7 +849,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="{{ count($columns) + 4 }}" style="text-align:center;padding:2rem;color:rgb(107 114 128);">
+                                    <td colspan="{{ count($columns) + 5 }}" style="text-align:center;padding:2rem;color:rgb(107 114 128);">
                                         Nenhuma combinação encontrada.
                                     </td>
                                 </tr>
@@ -684,16 +884,29 @@
                 @endif
             </div>
         </div>
-    @endif
 
-    {{-- ====================== COLUMN LEGEND ====================== --}}
-    @if ($isAnalyzed)
-    <div class="pca-card">
-        <div class="pca-card-header">
-            <span class="pca-card-title">Guia das colunas</span>
-        </div>
-        <div class="pca-card-body">
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem;">
+        {{-- ====================== COLUMN GUIDE (SIDEBAR) ====================== --}}
+        <aside class="pca-card pca-guide" x-cloak>
+            <div class="pca-guide-header">
+                <span class="pca-card-title" x-show="guideOpen">Guia das colunas</span>
+                <button
+                    type="button"
+                    class="pca-guide-toggle"
+                    @click="guideOpen = ! guideOpen"
+                    :title="guideOpen ? 'Minimizar guia' : 'Expandir guia'"
+                    aria-label="Minimizar ou expandir o guia das colunas"
+                >
+                    <span x-show="guideOpen" aria-hidden="true">&raquo;</span>
+                    <span x-show="! guideOpen" aria-hidden="true">&laquo;</span>
+                </button>
+            </div>
+
+            <button type="button" class="pca-guide-rail" x-show="! guideOpen" @click="guideOpen = true">
+                <span>Guia das colunas</span>
+            </button>
+
+            <div class="pca-guide-body" x-show="guideOpen">
+                <div style="display:flex;flex-direction:column;gap:1rem;">
 
                 <div style="display:flex;gap:.625rem;">
                     <div style="flex-shrink:0;width:2rem;height:2rem;background:rgb(239 246 255);border-radius:.375rem;display:flex;align-items:center;justify-content:center;">
@@ -766,8 +979,92 @@
                 </div>
 
             </div>
+            </div>
+        </aside>
         </div>
-    </div>
+    @endif
+
+    {{-- ====================== CURVE PREVIEW PANEL ====================== --}}
+    @if ($previewHash !== null)
+        @php
+            $pv = $preview;
+            $eqPoints = $pv['equity_points'] ?? [];
+            $ddPoints = $pv['drawdown_points'] ?? [];
+            $pW = 900; $pH = 150; $pPadL = 8; $pPadR = 8; $pPadT = 8; $pPadB = 8;
+
+            $buildPath = function (array $values, float $min, float $max) use ($pW, $pH, $pPadL, $pPadR, $pPadT, $pPadB): string {
+                $count = count($values);
+                if ($count < 2) { return ''; }
+                $range = ($max - $min) ?: 1.0;
+                $stepX = ($pW - $pPadL - $pPadR) / ($count - 1);
+                $path = '';
+                foreach (array_values($values) as $i => $v) {
+                    $x = round($pPadL + $i * $stepX, 2);
+                    $y = round($pPadT + ($pH - $pPadT - $pPadB) * (1 - (($v - $min) / $range)), 2);
+                    $path .= ($i === 0 ? 'M' : 'L') . $x . ',' . $y . ' ';
+                }
+                return trim($path);
+            };
+
+            $eqVals = array_map(fn ($p) => (float) $p['equity'], $eqPoints);
+            $eqMin = $eqVals ? min($eqVals) : 0.0;
+            $eqMax = $eqVals ? max($eqVals) : 1.0;
+            $eqPath = $buildPath($eqVals, $eqMin, $eqMax);
+
+            $ddVals = array_map(fn ($p) => (float) $p['value'], $ddPoints);
+            $ddMin = $ddVals ? min($ddVals) : -1.0;
+            $ddMax = 0.0;
+            $ddPath = $buildPath($ddVals, $ddMin, $ddMax);
+            $ddAreaPath = $ddPath !== ''
+                ? $ddPath . ' L' . round($pW - $pPadR, 2) . ',' . round($pPadT, 2) . ' L' . round($pPadL, 2) . ',' . round($pPadT, 2) . ' Z'
+                : '';
+        @endphp
+        <div class="pca-card">
+            <div class="pca-card-header">
+                <span class="pca-card-title">Prévia da curva &mdash; {{ implode(' + ', (array) ($pv['strategy_names'] ?? [])) }}</span>
+                <div class="pca-preview-actions">
+                    <button class="pca-btn pca-btn-success pca-btn-sm" wire:click="saveSingle('{{ $previewHash }}')" wire:loading.attr="disabled" wire:target="saveSingle('{{ $previewHash }}')">Salvar este portfólio</button>
+                    <button class="pca-btn-ghost" wire:click="closePreview">Fechar</button>
+                </div>
+            </div>
+            <div class="pca-card-body">
+                @if (($pv['has_data'] ?? false) !== true)
+                    <p style="color:rgb(107 114 128);font-size:.875rem;">Nenhum trade encontrado para esta combinação com os filtros atuais.</p>
+                @else
+                    <div class="pca-preview-chips">
+                        <div class="pca-preview-chip">
+                            <div class="pca-preview-chip-label">Lucro líquido</div>
+                            <div class="pca-preview-chip-value {{ (float) $pv['total_net_profit'] >= 0 ? 'pca-profit-pos' : 'pca-profit-neg' }}">{{ $fmtSigned($pv['total_net_profit']) }}</div>
+                        </div>
+                        <div class="pca-preview-chip">
+                            <div class="pca-preview-chip-label">Drawdown máximo</div>
+                            <div class="pca-preview-chip-value pca-profit-neg">{{ $fmtMoney($pv['max_drawdown']) }} ({{ $fmtPct($pv['max_drawdown_percent']) }})</div>
+                        </div>
+                        <div class="pca-preview-chip">
+                            <div class="pca-preview-chip-label">Trades</div>
+                            <div class="pca-preview-chip-value">{{ number_format((int) $pv['total_trades'], 0, ',', '.') }}</div>
+                        </div>
+                        <div class="pca-preview-chip">
+                            <div class="pca-preview-chip-label">Saldo inicial</div>
+                            <div class="pca-preview-chip-value">{{ $fmtMoney($pv['initial_balance']) }}</div>
+                        </div>
+                    </div>
+
+                    <div style="font-size:.75rem;color:rgb(107 114 128);margin-bottom:.25rem;">Curva de capital</div>
+                    <svg class="pca-preview-svg" viewBox="0 0 {{ $pW }} {{ $pH }}" preserveAspectRatio="none" role="img" aria-label="Curva de capital da combinação">
+                        <path d="{{ $eqPath }}" fill="none" stroke="rgb(37 99 235)" stroke-width="2" vector-effect="non-scaling-stroke" />
+                    </svg>
+
+                    <div style="font-size:.75rem;color:rgb(107 114 128);margin:.75rem 0 .25rem;">Drawdown (R$)</div>
+                    <svg class="pca-preview-svg" style="height:110px;" viewBox="0 0 {{ $pW }} {{ $pH }}" preserveAspectRatio="none" role="img" aria-label="Drawdown da combinação">
+                        @if ($ddAreaPath !== '')
+                            <path d="{{ $ddAreaPath }}" fill="rgb(220 38 38 / .12)" stroke="none" />
+                        @endif
+                        <path d="{{ $ddPath }}" fill="none" stroke="rgb(220 38 38)" stroke-width="1.75" vector-effect="non-scaling-stroke" />
+                    </svg>
+                @endif
+            </div>
+        </div>
     @endif
 
 </div>

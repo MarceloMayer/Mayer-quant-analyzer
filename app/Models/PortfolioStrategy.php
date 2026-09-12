@@ -2,12 +2,11 @@
 
 namespace App\Models;
 
+use App\Services\Portfolio\PortfolioMetricsCache;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\Cache;
-use App\Services\Metrics\PortfolioCorrelationService;
 
 #[Fillable([
     'portfolio_id',
@@ -40,17 +39,13 @@ class PortfolioStrategy extends Model
      * portfolio edit form must invalidate that cache immediately, otherwise the results page
      * would keep showing stale numbers until the TTL expires.
      */
-    private static function bustPortfolioMetricsCache(int $portfolioId): void
+    private static function bustPortfolioMetricsCache(?int $portfolioId): void
     {
-        Cache::forget('portfolio_metrics:'.$portfolioId);
-
-        $correlationService = app(PortfolioCorrelationService::class);
-
-        foreach (array_keys($correlationService->periodOptions()) as $period) {
-            foreach (array_keys($correlationService->metricOptions()) as $metric) {
-                Cache::forget("portfolio_correlation:{$portfolioId}:{$period}:{$metric}");
-            }
+        if ($portfolioId === null) {
+            return;
         }
+
+        app(PortfolioMetricsCache::class)->forgetPortfolio($portfolioId);
     }
 
     public function portfolio(): BelongsTo

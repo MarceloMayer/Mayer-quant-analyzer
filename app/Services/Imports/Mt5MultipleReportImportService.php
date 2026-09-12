@@ -6,6 +6,7 @@ use App\Models\Mt5ReportFile;
 use App\Models\Strategy;
 use App\Models\StrategyImport;
 use App\Models\Trade;
+use App\Services\Portfolio\PortfolioMetricsCache;
 use App\Services\Trading\Mt5TradeFingerprintService;
 use App\Services\Trading\Mt5XlsxReportParser;
 use App\Services\Trading\StrategyBacktestExecutionUpsertService;
@@ -21,6 +22,7 @@ class Mt5MultipleReportImportService
         private readonly Mt5XlsxReportParser $parser,
         private readonly Mt5TradeFingerprintService $fingerprints,
         private readonly StrategyBacktestExecutionUpsertService $executionUpsert,
+        private readonly PortfolioMetricsCache $portfolioMetricsCache,
     ) {}
 
     /**
@@ -207,6 +209,10 @@ class Mt5MultipleReportImportService
             'ignored_rows' => $summary['total_trades_skipped_duplicates'] + $summary['files_skipped_duplicate_hash'],
             'imported_at' => now(),
         ]);
+
+        if ($summary['total_trades_imported'] > 0) {
+            $this->portfolioMetricsCache->forgetForStrategy($strategy->id);
+        }
 
         $summary['warnings'] = array_values(array_unique($summary['warnings']));
 
