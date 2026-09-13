@@ -119,6 +119,8 @@ class PortfolioAnalyzerService
             'consolidated_monthly_cumulative_performance' => $monthlyCumulativePerformance,
             'monthly_cumulative_performance' => $monthlyCumulativePerformance,
             'daily_performance' => $dailyPerformance,
+            'worst_day_net_profit' => (float) ($dailyPerformance['worst_day']['net_profit'] ?? 0.0),
+            'worst_day_date' => $dailyPerformance['worst_day']['date'] ?? null,
             'monthly_table' => $this->monthlyTable($monthlyPerformance, $trades),
             'consolidated_max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],
             'max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],

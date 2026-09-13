@@ -30,6 +30,8 @@ class StrategyMetricsOverview extends StatsOverviewWidget
         $totalTrades = (int) ($this->metrics['total_trades'] ?? 0);
         $maxLosingStreak = (int) ($this->metrics['max_losing_streak'] ?? 0);
         $daysWithoutNewHigh = (int) ($this->metrics['max_days_without_new_high'] ?? 0);
+        $recoveryFactor = $this->metrics['net_profit_to_drawdown'] ?? null;
+        $worstDay = (float) ($this->metrics['worst_day_net_profit'] ?? 0);
 
         return [
             Stat::make('Resultado líquido', $this->formatSignedMoney($netProfit))
@@ -41,6 +43,16 @@ class StrategyMetricsOverview extends StatsOverviewWidget
             Stat::make('Drawdown máximo', $this->formatNegativeMoney($drawdown))
                 ->color($drawdown > 0 ? 'danger' : 'gray')
                 ->icon(Heroicon::OutlinedArrowTrendingDown),
+
+            Stat::make('Fator de recuperação', $recoveryFactor === null ? '-' : $this->formatNumber($recoveryFactor).'x')
+                ->description('Lucro líquido dividido pelo drawdown máximo')
+                ->color($this->ratioColor($recoveryFactor))
+                ->icon(Heroicon::OutlinedArrowPath),
+
+            Stat::make('Maior perda diária', $this->formatSignedMoney($worstDay))
+                ->description('Pior resultado em um único dia')
+                ->color($worstDay < 0 ? 'danger' : 'gray')
+                ->icon(Heroicon::OutlinedCalendarDays),
 
             Stat::make('Taxa de acerto', $this->formatPercent($winRate))
                 ->color($winRate > 0 ? 'success' : 'gray')

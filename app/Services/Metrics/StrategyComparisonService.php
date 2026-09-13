@@ -51,6 +51,7 @@ class StrategyComparisonService
         private readonly UlcerIndexCalculator $ulcerIndexCalculator,
         private readonly LinearRegressionService $linearRegressionService,
         private readonly InitialCapitalResolver $initialCapitalResolver,
+        private readonly PortfolioDailyPerformanceService $dailyPerformanceService,
     ) {}
 
     /**
@@ -218,6 +219,7 @@ class StrategyComparisonService
         $monthlyProfits = $this->monthlyProfits($trades);
         $positiveMonths = count(array_filter($monthlyProfits, fn (float $profit): bool => $profit > 0));
         $monthsWithTrades = count($monthlyProfits);
+        $dailyPerformance = $this->dailyPerformanceService->calculate($trades);
 
         return [
             'has_data' => $totalTrades > 0,
@@ -256,6 +258,8 @@ class StrategyComparisonService
             'equity_r2' => $this->linearRegressionService->calculateR2(
                 array_map(fn (array $point): float => (float) $point['equity'], $equityCurve),
             ),
+            'worst_day_net_profit' => (float) ($dailyPerformance['worst_day']['net_profit'] ?? 0.0),
+            'worst_day_date' => $dailyPerformance['worst_day']['date'] ?? null,
             'first_trade_date' => $trades->first()?->exit_time?->format('Y-m-d'),
             'last_trade_date' => $trades->last()?->exit_time?->format('Y-m-d'),
             'monthly_performance' => $monthlyPerformance,
@@ -345,6 +349,7 @@ class StrategyComparisonService
             ['key' => 'ulcer_index', 'label' => 'Ulcer index', 'hint' => 'Mede profundidade e duração dos drawdowns. Quanto menor, melhor.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_losing_streak', 'label' => 'Maior sequência de perdas', 'hint' => 'Maior número de trades perdedores consecutivos.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_days_without_new_high', 'label' => 'Dias sem romper topo', 'hint' => 'Maior intervalo sem nova máxima da curva de capital.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
+            ['key' => 'worst_day_net_profit', 'label' => 'Maior perda diária', 'hint' => 'Pior resultado consolidado em um único dia (soma dos trades fechados naquele dia).', 'group' => 'Risco', 'format' => 'money', 'direction' => 'higher', 'scored' => true],
 
             ['key' => 'win_rate', 'label' => 'Taxa de acerto', 'hint' => 'Percentual de trades com resultado positivo.', 'group' => 'Consistência', 'format' => 'percent', 'direction' => 'higher', 'scored' => true],
             ['key' => 'positive_months_percent', 'label' => 'Meses positivos', 'hint' => 'Percentual de meses com resultado positivo.', 'group' => 'Consistência', 'format' => 'percent', 'direction' => 'higher', 'scored' => true],
@@ -858,8 +863,8 @@ class StrategyComparisonService
         return match (true) {
             $absolute <= 0.20 => 'Boa diversificação',
             $absolute <= 0.40 => 'Atenção',
-            $absolute <= 0.70 => 'Correlação alta',
-            default => 'Correlação muito alta',
+            $absolute <= 0.70 => $correlation < 0 ? 'Correlação inversa' : 'Correlação alta',
+            default => $correlation < 0 ? 'Correlação inversa muito forte' : 'Correlação muito alta',
         };
     }
 
@@ -905,6 +910,7 @@ class StrategyComparisonService
             'positive_months_percent' => $combined['positive_months_percent'],
             'equity_r2' => $combined['equity_r2'],
             'ulcer_index' => $combined['ulcer_index'],
+            'worst_day_net_profit' => $combined['worst_day_net_profit'],
             'drawdown_sum' => $drawdownSum,
             'drawdown_reduction' => $drawdownReduction,
             'drawdown_reduction_percent' => $reductionPercent,

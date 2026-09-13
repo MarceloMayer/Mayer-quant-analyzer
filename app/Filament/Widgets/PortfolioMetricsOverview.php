@@ -92,6 +92,7 @@ class PortfolioMetricsOverview extends Widget
         $totalTrades = (int) ($this->metrics['total_trades'] ?? 0);
         $maxLosingStreak = (int) ($this->metrics['max_losing_streak'] ?? 0);
         $daysWithoutNewHigh = (int) ($this->metrics['consolidated_max_days_without_new_high'] ?? 0);
+        $worstDay = (float) ($this->metrics['worst_day_net_profit'] ?? 0);
 
         return [
             [
@@ -108,6 +109,11 @@ class PortfolioMetricsOverview extends Widget
                 'label' => 'Dias sem Romper Topo',
                 'value' => number_format($daysWithoutNewHigh, 0, ',', '.'),
                 'valueClass' => $daysWithoutNewHigh > 0 ? 'text-gray-950 dark:text-white' : 'text-emerald-600 dark:text-emerald-400',
+            ],
+            [
+                'label' => 'Maior Perda Diária',
+                'value' => $this->formatSignedMoney($worstDay),
+                'valueClass' => $this->moneyClasses($worstDay),
             ],
         ];
     }

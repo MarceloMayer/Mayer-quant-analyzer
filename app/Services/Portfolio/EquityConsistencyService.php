@@ -63,6 +63,13 @@ class EquityConsistencyService
      * Calculates the normalized consistency_score (0–100) for each result in the set.
      * Normalization is relative: metrics are scaled against the min/max within the run.
      *
+     * Recovery factor (net_profit_to_drawdown) carries the largest weight since it is the
+     * headline risk-adjusted-return metric traders judge a portfolio by. Correlation is
+     * scored on its absolute value: a combination whose strategies are either redundant
+     * (near +1) or offsetting each other's edge (near -1) is penalized the same way, since
+     * both defeat the point of diversifying. A combination with too little overlapping data
+     * to compute a correlation is neither rewarded nor penalized for it (neutral 100 score).
+     *
      * @param  array<int, array<string, mixed>>  $results
      * @return array<int, array<string, mixed>>
      */
@@ -74,14 +81,21 @@ class EquityConsistencyService
 
         $ulcerValues = array_column($results, 'ulcer_index');
         $ratioValues = array_column($results, 'net_profit_to_drawdown');
+        $correlationValues = array_values(array_filter(
+            array_column($results, 'average_absolute_correlation'),
+            fn (mixed $value): bool => $value !== null,
+        ));
 
         $minUlcer = min($ulcerValues);
         $maxUlcer = max($ulcerValues);
         $minRatio = min($ratioValues);
         $maxRatio = max($ratioValues);
+        $minCorrelation = $correlationValues === [] ? 0.0 : min($correlationValues);
+        $maxCorrelation = $correlationValues === [] ? 0.0 : max($correlationValues);
 
         $ulcerRange = $maxUlcer - $minUlcer;
         $ratioRange = $maxRatio - $minRatio;
+        $correlationRange = $maxCorrelation - $minCorrelation;
 
         foreach ($results as &$result) {
             $ulcerScore = $ulcerRange > 0
@@ -95,8 +109,19 @@ class EquityConsistencyService
             $r2Score = (float) $result['equity_r2'] * 100;
             $monthsScore = (float) $result['positive_months_percent'];
 
+            $correlation = $result['average_absolute_correlation'] ?? null;
+            $correlationScore = $correlation === null
+                ? 100.0
+                : ($correlationRange > 0
+                    ? (($maxCorrelation - (float) $correlation) / $correlationRange) * 100
+                    : 100.0);
+
             $result['consistency_score'] = round(
-                ($r2Score * 0.35) + ($ulcerScore * 0.25) + ($monthsScore * 0.20) + ($ratioScore * 0.20),
+                ($ratioScore * 0.25)
+                + ($r2Score * 0.25)
+                + ($ulcerScore * 0.20)
+                + ($correlationScore * 0.15)
+                + ($monthsScore * 0.15),
                 2
             );
         }

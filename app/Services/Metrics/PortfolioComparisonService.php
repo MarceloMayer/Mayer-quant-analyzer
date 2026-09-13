@@ -181,6 +181,7 @@ class PortfolioComparisonService
             ['key' => 'ulcer_index', 'label' => 'Ulcer index', 'hint' => 'Profundidade e duração dos drawdowns. Quanto menor, melhor.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_losing_streak', 'label' => 'Maior sequência de perdas', 'hint' => 'Maior número de trades perdedores consecutivos.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_days_without_new_high', 'label' => 'Dias sem romper topo', 'hint' => 'Maior intervalo sem nova máxima da curva consolidada.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
+            ['key' => 'worst_day_net_profit', 'label' => 'Maior perda diária', 'hint' => 'Pior resultado consolidado em um único dia (soma dos trades fechados naquele dia).', 'group' => 'Risco', 'format' => 'money', 'direction' => 'higher', 'scored' => true],
 
             ['key' => 'win_rate', 'label' => 'Taxa de acerto', 'hint' => 'Percentual de trades com resultado positivo.', 'group' => 'Consistência', 'format' => 'percent', 'direction' => 'higher', 'scored' => true],
             ['key' => 'positive_months_percent', 'label' => 'Meses positivos', 'hint' => 'Percentual de meses com resultado positivo.', 'group' => 'Consistência', 'format' => 'percent', 'direction' => 'higher', 'scored' => true],
@@ -659,8 +660,8 @@ class PortfolioComparisonService
         return match (true) {
             $absolute <= 0.20 => 'Boa diversificação',
             $absolute <= 0.40 => 'Atenção',
-            $absolute <= 0.70 => 'Correlação alta',
-            default => 'Correlação muito alta',
+            $absolute <= 0.70 => $correlation < 0 ? 'Correlação inversa' : 'Correlação alta',
+            default => $correlation < 0 ? 'Correlação inversa muito forte' : 'Correlação muito alta',
         };
     }
 
@@ -766,12 +767,14 @@ class PortfolioComparisonService
                 'positive_months_percent' => 0.0,
                 'equity_r2' => 0.0,
                 'ulcer_index' => 0.0,
+                'worst_day_net_profit' => 0.0,
             ];
         }
 
         $cum = 0.0;
         $curve = [];
         $months = [];
+        $days = [];
         $grossProfit = 0.0;
         $grossLoss = 0.0;
         $wins = 0;
@@ -795,6 +798,12 @@ class PortfolioComparisonService
             if ($monthKey !== null) {
                 $months[$monthKey] = ($months[$monthKey] ?? 0.0) + $weighted;
             }
+
+            $dayKey = $trade->exit_time?->format('Y-m-d');
+
+            if ($dayKey !== null) {
+                $days[$dayKey] = ($days[$dayKey] ?? 0.0) + $weighted;
+            }
         }
 
         $drawdown = $this->drawdownCalculator->calculate($curve, $baseline);
@@ -817,6 +826,7 @@ class PortfolioComparisonService
             'positive_months_percent' => $monthsWithTrades > 0 ? round(($positiveMonths / $monthsWithTrades) * 100, 2) : 0.0,
             'equity_r2' => $equityR2,
             'ulcer_index' => $ulcer,
+            'worst_day_net_profit' => $days === [] ? 0.0 : round(min($days), 2),
         ];
     }
 
