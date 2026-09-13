@@ -49,6 +49,8 @@ class PortfolioCombinationAnalyzerService
             $filters['end_date'] ?? null,
         );
 
+        $monthlySeries = $this->monthlySeriesByStrategy($tradesByStrategy);
+
         $total = count($combinations);
         $rawResults = [];
         $processed = 0;
@@ -60,6 +62,7 @@ class PortfolioCombinationAnalyzerService
                     $tradesByStrategy,
                     $strategies,
                     $initialBalance,
+                    $monthlySeries,
                 );
             }
 
@@ -219,6 +222,7 @@ class PortfolioCombinationAnalyzerService
      * @param  int[]  $combination
      * @param  array<int, array<int, array<string, mixed>>>  $tradesByStrategy
      * @param  Collection<int, Strategy>  $strategies
+     * @param  array<int, float[]>  $monthlySeries  Per-strategy monthly P&L, aligned to a shared month index
      * @return array<string, mixed>
      */
     private function calculateCombinationMetrics(
@@ -226,6 +230,7 @@ class PortfolioCombinationAnalyzerService
         array $tradesByStrategy,
         Collection $strategies,
         float $initialBalance,
+        array $monthlySeries,
     ): array {
         $hash = $this->generatorService->combinationHash($combination);
 
@@ -304,6 +309,8 @@ class PortfolioCombinationAnalyzerService
             $drawdown['max_drawdown'],
         );
 
+        $correlation = $this->correlationMetrics($combination, $monthlySeries);
+
         return [
             'combination_hash' => $hash,
             'strategy_ids' => $combination,
@@ -322,6 +329,8 @@ class PortfolioCombinationAnalyzerService
             'ulcer_index' => $consistency['ulcer_index'],
             'equity_r2' => $consistency['equity_r2'],
             'net_profit_to_drawdown' => $consistency['net_profit_to_drawdown'],
+            'average_absolute_correlation' => $correlation['average_absolute_correlation'],
+            'highest_absolute_correlation' => $correlation['highest_absolute_correlation'],
             'consistency_score' => 0.0, // set by applyConsistencyScores()
             'initial_balance' => $initialBalance,
             'spark' => $this->sparkline($equityCurve),
@@ -357,10 +366,131 @@ class PortfolioCombinationAnalyzerService
             'ulcer_index' => 0.0,
             'equity_r2' => 0.0,
             'net_profit_to_drawdown' => 0.0,
+            'average_absolute_correlation' => null,
+            'highest_absolute_correlation' => null,
             'consistency_score' => 0.0,
             'initial_balance' => $initialBalance,
             'spark' => [],
         ];
+    }
+
+    /**
+     * Builds each strategy's monthly net-profit series aligned to the same global list of
+     * months, so any pair's Pearson correlation can be computed later without rebuilding
+     * indexes per combination.
+     *
+     * @param  array<int, array<int, array<string, mixed>>>  $tradesByStrategy
+     * @return array<int, float[]>
+     */
+    private function monthlySeriesByStrategy(array $tradesByStrategy): array
+    {
+        $months = [];
+
+        foreach ($tradesByStrategy as $trades) {
+            foreach ($trades as $trade) {
+                if ($trade['month_key'] !== null) {
+                    $months[$trade['month_key']] = true;
+                }
+            }
+        }
+
+        $months = array_keys($months);
+        sort($months);
+        $monthIndexes = array_flip($months);
+        $monthCount = count($months);
+
+        $series = [];
+
+        foreach ($tradesByStrategy as $strategyId => $trades) {
+            $values = array_fill(0, $monthCount, 0.0);
+
+            foreach ($trades as $trade) {
+                if ($trade['month_key'] === null) {
+                    continue;
+                }
+
+                $values[$monthIndexes[$trade['month_key']]] += $trade['net_profit'];
+            }
+
+            $series[$strategyId] = $values;
+        }
+
+        return $series;
+    }
+
+    /**
+     * Average and highest absolute pairwise correlation among a combination's strategies,
+     * based on monthly P&L. Null when there is not enough overlapping data — a strongly
+     * positive or strongly negative correlation are equally undesirable here (redundant
+     * strategies vs. strategies that cancel each other's edge out), so pairs are ranked by
+     * the absolute value.
+     *
+     * @param  int[]  $combination
+     * @param  array<int, float[]>  $monthlySeries
+     * @return array{average_absolute_correlation: float|null, highest_absolute_correlation: float|null}
+     */
+    private function correlationMetrics(array $combination, array $monthlySeries): array
+    {
+        $count = count($combination);
+        $values = [];
+
+        for ($i = 0; $i < $count; $i++) {
+            for ($j = $i + 1; $j < $count; $j++) {
+                $correlation = $this->pearson(
+                    $monthlySeries[$combination[$i]] ?? [],
+                    $monthlySeries[$combination[$j]] ?? [],
+                );
+
+                if ($correlation !== null) {
+                    $values[] = abs($correlation);
+                }
+            }
+        }
+
+        if ($values === []) {
+            return ['average_absolute_correlation' => null, 'highest_absolute_correlation' => null];
+        }
+
+        return [
+            'average_absolute_correlation' => round(array_sum($values) / count($values), 4),
+            'highest_absolute_correlation' => round(max($values), 4),
+        ];
+    }
+
+    /**
+     * @param  float[]  $firstSeries
+     * @param  float[]  $secondSeries
+     */
+    private function pearson(array $firstSeries, array $secondSeries): ?float
+    {
+        $count = min(count($firstSeries), count($secondSeries));
+
+        if ($count < 2) {
+            return null;
+        }
+
+        $firstAverage = array_sum($firstSeries) / $count;
+        $secondAverage = array_sum($secondSeries) / $count;
+        $numerator = 0.0;
+        $firstVariance = 0.0;
+        $secondVariance = 0.0;
+
+        for ($index = 0; $index < $count; $index++) {
+            $firstDelta = $firstSeries[$index] - $firstAverage;
+            $secondDelta = $secondSeries[$index] - $secondAverage;
+
+            $numerator += $firstDelta * $secondDelta;
+            $firstVariance += $firstDelta ** 2;
+            $secondVariance += $secondDelta ** 2;
+        }
+
+        $denominator = sqrt($firstVariance * $secondVariance);
+
+        if ($denominator <= 0.00000001) {
+            return null;
+        }
+
+        return round(max(-1, min(1, $numerator / $denominator)), 4);
     }
 
     /**

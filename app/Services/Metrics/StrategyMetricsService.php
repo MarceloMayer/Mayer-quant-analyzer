@@ -4,6 +4,8 @@ namespace App\Services\Metrics;
 
 use App\Models\Strategy;
 use App\Models\Trade;
+use App\Services\Portfolio\LinearRegressionService;
+use App\Services\Portfolio\UlcerIndexCalculator;
 use Illuminate\Support\Collection;
 
 class StrategyMetricsService
@@ -15,6 +17,9 @@ class StrategyMetricsService
         private readonly MonthlyPerformanceService $monthlyPerformanceService,
         private readonly StreakCalculator $streakCalculator,
         private readonly InitialCapitalResolver $initialCapitalResolver,
+        private readonly PortfolioDailyPerformanceService $dailyPerformanceService,
+        private readonly UlcerIndexCalculator $ulcerIndexCalculator,
+        private readonly LinearRegressionService $linearRegressionService,
     ) {}
 
     /**
@@ -35,6 +40,11 @@ class StrategyMetricsService
         $monthlyPerformance = $this->monthlyPerformanceService->calculate($trades);
         $monthlyCumulativePerformance = $this->monthlyPerformanceService->calculateCumulative($trades);
         $daysWithoutNewHigh = $this->daysWithoutNewHighCalculator->calculate($equityCurve);
+        $dailyPerformance = $this->dailyPerformanceService->calculate($trades);
+        $ulcerIndex = $this->ulcerIndexCalculator->calculate($equityCurve, $initialCapital);
+        $equityR2 = $this->linearRegressionService->calculateR2(
+            array_map(fn (array $point): float => (float) ($point['equity'] ?? 0), $equityCurve),
+        );
 
         $profits = $trades->map(fn (Trade $trade): float => (float) $trade->net_profit);
         $winningTrades = $profits->filter(fn (float $profit): bool => $profit > 0);
@@ -46,6 +56,10 @@ class StrategyMetricsService
         $averageWin = $winningTrades->isNotEmpty() ? (float) $winningTrades->avg() : 0.0;
         $averageLoss = $losingTrades->isNotEmpty() ? (float) $losingTrades->avg() : 0.0;
         $averagePayoff = $averageWin > 0 && $averageLoss < 0 ? $averageWin / abs($averageLoss) : null;
+        $absDrawdown = abs((float) $drawdown['max_drawdown']);
+        $netProfitToDrawdown = $absDrawdown > 0
+            ? round($netProfit / $absDrawdown, 2)
+            : ($netProfit > 0 ? 100.0 : 0.0);
 
         return [
             'net_profit' => round($netProfit, 2),
@@ -70,6 +84,9 @@ class StrategyMetricsService
             'max_drawdown_percent' => $drawdown['max_drawdown_percent'],
             'drawdown_peak' => $drawdown['peak'],
             'drawdown_valley' => $drawdown['valley'],
+            'net_profit_to_drawdown' => $netProfitToDrawdown,
+            'ulcer_index' => $ulcerIndex,
+            'equity_r2' => $equityR2,
             'equity_curve' => $equityCurve,
             'drawdown_curve' => $this->drawdownCurve($equityCurve, $initialCapital),
             'monthly_performance' => $monthlyPerformance,
@@ -77,6 +94,9 @@ class StrategyMetricsService
             'monthly_table' => $this->monthlyTable($monthlyPerformance, $trades),
             'strategy_trades' => $this->summarizedTrades($trades),
             'max_days_without_new_high' => $daysWithoutNewHigh['max_days_without_new_high'],
+            'daily_performance' => $dailyPerformance,
+            'worst_day_net_profit' => (float) ($dailyPerformance['worst_day']['net_profit'] ?? 0.0),
+            'worst_day_date' => $dailyPerformance['worst_day']['date'] ?? null,
         ];
     }
 

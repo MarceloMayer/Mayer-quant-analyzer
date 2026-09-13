@@ -310,8 +310,8 @@ class PortfolioCorrelationService
         return match (true) {
             $absolute <= 0.20 => 'Boa diversificação',
             $absolute <= 0.40 => 'Atenção',
-            $absolute <= 0.70 => 'Correlação alta',
-            default => 'Correlação muito alta',
+            $absolute <= 0.70 => $correlation < 0 ? 'Correlação inversa' : 'Correlação alta',
+            default => $correlation < 0 ? 'Correlação inversa muito forte' : 'Correlação muito alta',
         };
     }
 

@@ -20,6 +20,7 @@
         'ulcer_index'             => 'Ulcer',
         'equity_r2'               => 'R²',
         'net_profit_to_drawdown'  => 'L/DD',
+        'average_absolute_correlation' => 'Correl. Média',
         'strategies_count'        => 'Qtd Est.',
         'total_trades'            => 'Trades',
     ];
@@ -731,6 +732,10 @@
                                     $score = (float) $result['consistency_score'];
                                     $scoreClass = $score >= 70 ? 'pca-score-high' : ($score >= 40 ? 'pca-score-mid' : 'pca-score-low');
                                     $profitClass = $profit >= 0 ? 'pca-profit-pos' : 'pca-profit-neg';
+                                    $correlation = $result['average_absolute_correlation'] ?? null;
+                                    $correlationClass = $correlation === null
+                                        ? ''
+                                        : ((float) $correlation <= 0.20 ? 'pca-score-high' : ((float) $correlation <= 0.40 ? 'pca-score-mid' : 'pca-score-low'));
 
                                     $displayNames = count($names) <= 3
                                         ? $names
@@ -819,6 +824,13 @@
 
                                     {{-- L/DD --}}
                                     <td>{{ $fmtNull($result['net_profit_to_drawdown'], 'x') }}</td>
+
+                                    {{-- Correl. Média --}}
+                                    <td>
+                                        <span class="{{ $correlationClass }}" title="Correlação absoluta média entre os pares de estratégias da combinação. Próxima de 0 é melhor.">
+                                            {{ $correlation === null ? '—' : $fmt($correlation, 2) }}
+                                        </span>
+                                    </td>
 
                                     {{-- Qtd Est. --}}
                                     <td style="text-align:center;">{{ $result['strategies_count'] }}</td>
