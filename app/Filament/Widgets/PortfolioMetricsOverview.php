@@ -2,15 +2,15 @@
 
 namespace App\Filament\Widgets;
 
-use Filament\Support\Icons\Heroicon;
-use Filament\Widgets\StatsOverviewWidget;
-use Filament\Widgets\StatsOverviewWidget\Stat;
+use Filament\Widgets\Widget;
 
-class PortfolioMetricsOverview extends StatsOverviewWidget
+class PortfolioMetricsOverview extends Widget
 {
+    protected string $view = 'filament.widgets.portfolio-metrics-overview';
+
     protected static bool $isDiscovered = false;
 
-    protected ?string $heading = null;
+    protected int|string|array $columnSpan = 'full';
 
     /**
      * @var array<string, mixed>
@@ -18,70 +18,103 @@ class PortfolioMetricsOverview extends StatsOverviewWidget
     public array $metrics = [];
 
     /**
-     * @return array<Stat>
+     * Three compound "hero" cards, mirroring a portfolio-analytics dashboard reference:
+     * each pairs a headline metric with the secondary figures that explain it, instead
+     * of scattering every stat across same-weight single-value tiles.
+     *
+     * @return array<int, array<string, mixed>>
      */
-    protected function getStats(): array
+    public function heroCards(): array
     {
+        $daily = $this->metrics['daily_performance'] ?? [];
+
         $netProfit = (float) ($this->metrics['consolidated_net_profit'] ?? 0);
-        $drawdown = (float) ($this->metrics['consolidated_max_drawdown'] ?? 0);
-        $winRate = (float) ($this->metrics['consolidated_win_rate'] ?? 0);
+        $monthsWithTrades = (int) ($this->metrics['months_with_trades'] ?? 0);
+        $averageMonth = $monthsWithTrades > 0 ? $netProfit / $monthsWithTrades : null;
+
+        $totalDays = (int) ($daily['total_days'] ?? 0);
+        $positiveDays = (int) ($daily['positive_days'] ?? 0);
+        $negativeDays = (int) ($daily['negative_days'] ?? 0);
+        $neutralDays = (int) ($daily['neutral_days'] ?? 0);
+
         $profitFactor = $this->metrics['consolidated_profit_factor'] ?? null;
+        $winRate = (float) ($this->metrics['consolidated_win_rate'] ?? 0);
+        $recoveryFactor = $this->metrics['net_profit_to_drawdown'] ?? null;
+
         $payoff = $this->metrics['consolidated_payoff'] ?? null;
+        $averagePositiveDay = (float) ($daily['average_positive_day'] ?? 0);
+        $averageNegativeDay = (float) ($daily['average_negative_day'] ?? 0);
+
+        return [
+            [
+                'label' => 'Lucro Total',
+                'value' => $this->formatSignedMoney($netProfit),
+                'valueClass' => $this->moneyClasses($netProfit),
+                'aside_label' => 'Média Mensal',
+                'aside_value' => $averageMonth === null ? '-' : $this->formatSignedMoney($averageMonth),
+                'total_days' => $totalDays,
+                'positive_days' => $positiveDays,
+                'negative_days' => $negativeDays,
+                'neutral_days' => $neutralDays,
+                'positive_day_rate' => (float) ($daily['positive_day_rate'] ?? 0),
+                'negative_day_rate' => (float) ($daily['negative_day_rate'] ?? 0),
+                'neutral_day_rate' => (float) ($daily['neutral_day_rate'] ?? 0),
+            ],
+            [
+                'label' => 'Fator de Lucro',
+                'value' => $profitFactor === null ? 'Sem perdas' : $this->formatNumber($profitFactor),
+                'valueClass' => $this->ratioClasses($profitFactor),
+                'sub' => [
+                    ['label' => 'Taxa de Acerto', 'value' => $this->formatPercent($winRate)],
+                    ['label' => 'Fator de Recuperação', 'value' => $recoveryFactor === null ? '-' : $this->formatNumber($recoveryFactor)],
+                ],
+            ],
+            [
+                'label' => 'Payoff',
+                'value' => $payoff === null ? '-' : $this->formatNumber($payoff),
+                'valueClass' => $this->ratioClasses($payoff),
+                'sub' => [
+                    ['label' => 'Média Dias Positivos', 'value' => $this->formatSignedMoney($averagePositiveDay), 'valueClass' => $this->moneyClasses($averagePositiveDay)],
+                    ['label' => 'Média Dias Negativos', 'value' => $this->formatSignedMoney($averageNegativeDay), 'valueClass' => $this->moneyClasses($averageNegativeDay)],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Secondary indicators that don't need hero treatment but were previously shown
+     * as standalone stat tiles.
+     *
+     * @return array<int, array{label: string, value: string, valueClass: string}>
+     */
+    public function secondaryStats(): array
+    {
         $totalTrades = (int) ($this->metrics['total_trades'] ?? 0);
         $maxLosingStreak = (int) ($this->metrics['max_losing_streak'] ?? 0);
         $daysWithoutNewHigh = (int) ($this->metrics['consolidated_max_days_without_new_high'] ?? 0);
 
         return [
-            Stat::make('Resultado líquido total', $this->formatSignedMoney($netProfit))
-                ->color($this->moneyColor($netProfit))
-                ->icon($netProfit >= 0 ? Heroicon::OutlinedArrowTrendingUp : Heroicon::OutlinedArrowTrendingDown)
-                ->chart($this->equityChart())
-                ->chartColor($this->moneyColor($netProfit)),
-
-            Stat::make('Drawdown máximo', $this->formatNegativeMoney($drawdown))
-                ->color($drawdown > 0 ? 'danger' : 'gray')
-                ->icon(Heroicon::OutlinedArrowTrendingDown),
-
-            Stat::make('Taxa de acerto', $this->formatPercent($winRate))
-                ->color($winRate > 0 ? 'success' : 'gray')
-                ->icon(Heroicon::OutlinedShieldCheck),
-
-            Stat::make('Profit factor', $profitFactor === null ? 'Sem perdas' : $this->formatNumber($profitFactor))
-                ->color($this->ratioColor($profitFactor))
-                ->icon(Heroicon::OutlinedCalculator),
-
-            Stat::make('Payoff médio', $payoff === null ? '-' : $this->formatNumber($payoff))
-                ->color($this->ratioColor($payoff))
-                ->icon(Heroicon::OutlinedScale),
-
-            Stat::make('Total de trades', number_format($totalTrades, 0, ',', '.'))
-                ->color($totalTrades > 0 ? 'primary' : 'gray')
-                ->icon(Heroicon::OutlinedHashtag),
-
-            Stat::make('Maior sequência de perdas', number_format($maxLosingStreak, 0, ',', '.'))
-                ->color($maxLosingStreak > 0 ? 'danger' : 'gray')
-                ->icon(Heroicon::OutlinedExclamationTriangle),
-
-            Stat::make('Dias sem romper topo', number_format($daysWithoutNewHigh, 0, ',', '.'))
-                ->description('Maior intervalo sem nova máxima acumulada')
-                ->color($daysWithoutNewHigh > 0 ? 'gray' : 'success')
-                ->icon(Heroicon::OutlinedClock),
+            [
+                'label' => 'Total de Trades',
+                'value' => number_format($totalTrades, 0, ',', '.'),
+                'valueClass' => 'text-gray-950 dark:text-white',
+            ],
+            [
+                'label' => 'Maior Sequência de Perdas',
+                'value' => number_format($maxLosingStreak, 0, ',', '.'),
+                'valueClass' => $maxLosingStreak > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-gray-950 dark:text-white',
+            ],
+            [
+                'label' => 'Dias sem Romper Topo',
+                'value' => number_format($daysWithoutNewHigh, 0, ',', '.'),
+                'valueClass' => $daysWithoutNewHigh > 0 ? 'text-gray-950 dark:text-white' : 'text-emerald-600 dark:text-emerald-400',
+            ],
         ];
     }
 
     private function formatSignedMoney(float $value): string
     {
-        return ($value > 0 ? '+' : '').$this->formatMoney($value);
-    }
-
-    private function formatNegativeMoney(float $value): string
-    {
-        return $value > 0 ? '-'.$this->formatMoney($value) : $this->formatMoney(0);
-    }
-
-    private function formatMoney(float $value): string
-    {
-        return 'R$ '.number_format(abs($value), 2, ',', '.');
+        return ($value > 0 ? '+' : ($value < 0 ? '-' : '')).'R$ '.number_format(abs($value), 2, ',', '.');
     }
 
     private function formatPercent(float $value): string
@@ -94,34 +127,23 @@ class PortfolioMetricsOverview extends StatsOverviewWidget
         return number_format((float) $value, 2, ',', '.');
     }
 
-    private function moneyColor(float $value): string
+    private function moneyClasses(float $value): string
     {
         return match (true) {
-            $value > 0 => 'success',
-            $value < 0 => 'danger',
-            default => 'gray',
+            $value > 0 => 'text-emerald-600 dark:text-emerald-400',
+            $value < 0 => 'text-rose-600 dark:text-rose-400',
+            default => 'text-gray-600 dark:text-gray-300',
         };
     }
 
-    private function ratioColor(mixed $value): string
+    private function ratioClasses(mixed $value): string
     {
         if ($value === null) {
-            return 'gray';
+            return 'text-gray-600 dark:text-gray-300';
         }
 
-        return (float) $value >= 1 ? 'success' : 'danger';
-    }
-
-    /**
-     * @return array<float>
-     */
-    private function equityChart(): array
-    {
-        return collect($this->metrics['consolidated_equity_curve'] ?? [])
-            ->pluck('equity')
-            ->map(fn (mixed $value): float => (float) $value)
-            ->take(-12)
-            ->values()
-            ->all();
+        return (float) $value >= 1
+            ? 'text-emerald-600 dark:text-emerald-400'
+            : 'text-rose-600 dark:text-rose-400';
     }
 }

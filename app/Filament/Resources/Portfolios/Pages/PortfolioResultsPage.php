@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Portfolios\Pages;
 use App\Filament\Resources\Portfolios\PortfolioResource;
 use App\Models\Portfolio;
 use App\Models\PortfolioStrategy;
+use App\Services\Metrics\MonthlyPerformanceService;
 use App\Services\Metrics\PortfolioAnalyzerService;
 use App\Services\Metrics\PortfolioCorrelationService;
 use App\Services\Portfolio\PortfolioWeightOptimizerService;
@@ -36,6 +37,8 @@ class PortfolioResultsPage extends ViewRecord
 
     public int $dailyPage = 1;
 
+    public string $selectedMonthlyYear = 'all';
+
     /**
      * Result of the last weight-optimizer run, rendered as an in-page suggestion panel
      * until the user applies or discards it.
@@ -51,6 +54,8 @@ class PortfolioResultsPage extends ViewRecord
                 View::make('filament.resources.portfolios.pages.portfolio-results-page')
                     ->viewData(function (): array {
                         $metrics = $this->metrics();
+                        $monthlyPerformance = $metrics['consolidated_monthly_performance'] ?? [];
+                        $monthlyCumulativePerformance = $metrics['consolidated_monthly_cumulative_performance'] ?? [];
 
                         return [
                             'portfolio' => $this->portfolio(),
@@ -58,6 +63,11 @@ class PortfolioResultsPage extends ViewRecord
                             'dailyTable' => $this->dailyTable($metrics['daily_performance'] ?? []),
                             'correlation' => $this->correlation(),
                             'weightSuggestion' => $this->weightSuggestion,
+                            'selectedMonthlyYear' => $this->selectedMonthlyYear,
+                            'monthlyYearOptions' => $this->monthlyYearOptions($monthlyPerformance),
+                            'filteredMonthlyPerformance' => $this->filterByYear($monthlyPerformance),
+                            'filteredMonthlyCumulativePerformance' => $this->filterByYear($monthlyCumulativePerformance),
+                            'selectedYearBars' => $this->selectedYearBars($metrics['monthly_table'] ?? []),
                         ];
                     }),
             ]);
@@ -93,6 +103,73 @@ class PortfolioResultsPage extends ViewRecord
                 $this->correlationMetric,
             ),
         );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $monthlyPerformance
+     * @return array<int, int>
+     */
+    private function monthlyYearOptions(array $monthlyPerformance): array
+    {
+        return collect($monthlyPerformance)
+            ->pluck('year')
+            ->map(fn (mixed $year): int => (int) $year)
+            ->unique()
+            ->sortDesc()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $performance
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterByYear(array $performance): array
+    {
+        if ($this->selectedMonthlyYear === 'all') {
+            return $performance;
+        }
+
+        $year = (int) $this->selectedMonthlyYear;
+
+        return collect($performance)
+            ->filter(fn (array $row): bool => (int) ($row['year'] ?? 0) === $year)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Builds the {label, net_profit, trade_count} rows PeriodResultBarChart expects for the
+     * currently selected year, omitting months without trades instead of showing them as zero.
+     *
+     * @param  array<int, array<string, mixed>>  $monthlyTable
+     * @return array<int, array{label: string, net_profit: float, trade_count: int}>
+     */
+    private function selectedYearBars(array $monthlyTable): array
+    {
+        if ($this->selectedMonthlyYear === 'all') {
+            return [];
+        }
+
+        $year = (int) $this->selectedMonthlyYear;
+        $row = collect($monthlyTable)->first(fn (array $row): bool => (int) ($row['year'] ?? 0) === $year);
+
+        if ($row === null) {
+            return [];
+        }
+
+        $monthLabels = array_values(MonthlyPerformanceService::MONTHS);
+
+        return collect($row['months'] ?? [])
+            ->values()
+            ->map(fn (array $month, int $index): array => [
+                'label' => $monthLabels[$index] ?? '',
+                'net_profit' => (float) ($month['profit'] ?? 0),
+                'trade_count' => (int) ($month['trades'] ?? 0),
+            ])
+            ->filter(fn (array $month): bool => $month['trade_count'] > 0)
+            ->values()
+            ->all();
     }
 
     public function updatedDailyFilter(): void
