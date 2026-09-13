@@ -988,23 +988,83 @@
             Nenhum trade com data de saída encontrado para as estratégias ativas deste portfólio.
         </div>
     @else
+        @php
+            $maxDrawdown = (float) ($metrics['consolidated_max_drawdown'] ?? 0);
+            $maxDrawdownPercent = (float) ($metrics['consolidated_max_drawdown_percent'] ?? 0);
+            $bestDay = $dailyPerformance['best_day'] ?? null;
+            $worstDay = $dailyPerformance['worst_day'] ?? null;
+        @endphp
+
         <div class="space-y-5">
-            @livewire(\App\Filament\Widgets\EquityCurveChart::class, [
-                'heading' => 'Resultado financeiro acumulado',
-                'curve' => $metrics['consolidated_equity_curve'] ?? [],
-            ])
+            <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                <div class="xl:col-span-2">
+                    @livewire(\App\Filament\Widgets\EquityCurveChart::class, [
+                        'heading' => 'Resultado financeiro acumulado',
+                        'curve' => $metrics['consolidated_equity_curve'] ?? [],
+                    ])
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-1">
+                    <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Drawdown Máximo</div>
+                        <div class="mt-1 text-xl font-bold {{ $maxDrawdown > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-gray-600 dark:text-gray-300' }}">
+                            {{ $maxDrawdown > 0 ? '-' : '' }}{{ $formatMoney($maxDrawdown) }}
+                        </div>
+                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ $maxDrawdownPercent > 0 ? '-' : '' }}{{ $formatPercent($maxDrawdownPercent) }} do topo da curva</div>
+                    </div>
+
+                    <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Maior Loss Diário</div>
+                        <div class="mt-1 text-xl font-bold text-rose-600 dark:text-rose-400">{{ $formatSignedMoney(data_get($worstDay, 'net_profit', 0)) }}</div>
+                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ $formatDate(data_get($worstDay, 'date')) }}</div>
+                    </div>
+
+                    <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Maior Gain Diário</div>
+                        <div class="mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-400">{{ $formatSignedMoney(data_get($bestDay, 'net_profit', 0)) }}</div>
+                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ $formatDate(data_get($bestDay, 'date')) }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                        <div class="text-sm font-semibold text-gray-950 dark:text-white">Resultado mensal e acumulado</div>
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Escolha um ano para ver apenas aquele período, ou veja todos os anos lado a lado.</p>
+                    </div>
+
+                    <label class="grid gap-1">
+                        <span class="text-xs font-semibold text-gray-600 dark:text-gray-300">Por ano</span>
+                        <select wire:model.live="selectedMonthlyYear" class="mqa-correlation-select">
+                            <option value="all">Todos os anos</option>
+                            @foreach ($monthlyYearOptions as $year)
+                                <option value="{{ $year }}">{{ $year }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                </div>
+
+                @if ($selectedMonthlyYear !== 'all' && filled($selectedYearBars))
+                    @livewire(\App\Filament\Widgets\PeriodResultBarChart::class, [
+                        'heading' => $selectedMonthlyYear.' - Mês a mês',
+                        'description' => 'Meses sem operações são omitidos, não tratados como lucro ou prejuízo.',
+                        'rows' => $selectedYearBars,
+                    ], key('monthly-bars-'.$selectedMonthlyYear))
+                @endif
+            </div>
 
             @livewire(\App\Filament\Widgets\MonthlyPerformanceTable::class, [
                 'heading' => 'Resultado mês a mês',
                 'description' => 'Resultado financeiro consolidado de cada mês, calculado pelos trades fechados das estratégias ativas.',
-                'performance' => $metrics['consolidated_monthly_performance'] ?? [],
-            ])
+                'performance' => $filteredMonthlyPerformance,
+            ], key('monthly-table-'.$selectedMonthlyYear))
 
             @livewire(\App\Filament\Widgets\MonthlyPerformanceTable::class, [
                 'heading' => 'Resultado acumulado por mês',
                 'description' => 'Saldo acumulado ao final de cada mês, reconstruído pela curva consolidada ordenada por data de saída.',
-                'performance' => $metrics['consolidated_monthly_cumulative_performance'] ?? [],
-            ])
+                'performance' => $filteredMonthlyCumulativePerformance,
+            ], key('monthly-cumulative-table-'.$selectedMonthlyYear))
         </div>
     @endif
 
