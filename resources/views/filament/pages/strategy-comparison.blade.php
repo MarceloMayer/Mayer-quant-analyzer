@@ -430,6 +430,7 @@
                             <div class="sc-mini-value {{ (float) $metrics['max_drawdown'] > 0 ? 'sc-negative' : 'sc-muted' }}">
                                 {{ (float) $metrics['max_drawdown'] > 0 ? '-' . $money($metrics['max_drawdown']) : $money(0) }}
                             </div>
+                            <div class="sc-mini-label">Fator de Recuperação: {{ $metrics['net_profit_to_drawdown'] === null ? $emptyLabel('net_profit_to_drawdown', (bool) $metrics['has_data']) : number_format((float) $metrics['net_profit_to_drawdown'], 2, ',', '.') }}</div>
                         </div>
                         <div class="sc-mini">
                             <div class="sc-mini-label">Profit factor</div>
@@ -665,7 +666,7 @@
                         <div class="sc-mini">
                             <div class="sc-mini-label">Profit factor</div>
                             <div class="sc-mini-value">{{ $combined['profit_factor'] === null ? 'Sem perdas' : number_format((float) $combined['profit_factor'], 2, ',', '.') }}</div>
-                            <div class="sc-mini-label">Lucro/DD: {{ $combined['net_profit_to_drawdown'] === null ? '—' : number_format((float) $combined['net_profit_to_drawdown'], 2, ',', '.') }}</div>
+                            <div class="sc-mini-label">Fator de Recuperação: {{ $combined['net_profit_to_drawdown'] === null ? '—' : number_format((float) $combined['net_profit_to_drawdown'], 2, ',', '.') }}</div>
                         </div>
                         <div class="sc-mini">
                             <div class="sc-mini-label">Meses positivos</div>

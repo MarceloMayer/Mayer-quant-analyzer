@@ -341,7 +341,7 @@ class StrategyComparisonService
 
             ['key' => 'max_drawdown', 'label' => 'Drawdown máximo', 'hint' => 'Maior queda financeira a partir de um topo da curva.', 'group' => 'Risco', 'format' => 'money_negative', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_drawdown_percent', 'label' => 'Drawdown máximo (%)', 'hint' => 'Maior queda percentual a partir de um topo da curva.', 'group' => 'Risco', 'format' => 'percent', 'direction' => 'lower', 'scored' => true],
-            ['key' => 'net_profit_to_drawdown', 'label' => 'Lucro / drawdown', 'hint' => 'Quantas vezes o resultado cobre o pior drawdown.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'higher', 'scored' => true],
+            ['key' => 'net_profit_to_drawdown', 'label' => 'Fator de Recuperação', 'hint' => 'Lucro líquido dividido pelo drawdown máximo. Quantas vezes o resultado cobre o pior drawdown.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'higher', 'scored' => true],
             ['key' => 'ulcer_index', 'label' => 'Ulcer index', 'hint' => 'Mede profundidade e duração dos drawdowns. Quanto menor, melhor.', 'group' => 'Risco', 'format' => 'ratio', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_losing_streak', 'label' => 'Maior sequência de perdas', 'hint' => 'Maior número de trades perdedores consecutivos.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],
             ['key' => 'max_days_without_new_high', 'label' => 'Dias sem romper topo', 'hint' => 'Maior intervalo sem nova máxima da curva de capital.', 'group' => 'Risco', 'format' => 'integer', 'direction' => 'lower', 'scored' => true],

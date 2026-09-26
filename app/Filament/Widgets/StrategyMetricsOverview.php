@@ -26,6 +26,7 @@ class StrategyMetricsOverview extends StatsOverviewWidget
         $drawdown = (float) ($this->metrics['max_drawdown'] ?? 0);
         $winRate = (float) ($this->metrics['win_rate'] ?? 0);
         $profitFactor = $this->metrics['profit_factor'] ?? null;
+        $recoveryFactor = $this->metrics['profit_drawdown_ratio'] ?? null;
         $payoff = $this->metrics['average_payoff'] ?? null;
         $totalTrades = (int) ($this->metrics['total_trades'] ?? 0);
         $maxLosingStreak = (int) ($this->metrics['max_losing_streak'] ?? 0);
@@ -41,6 +42,10 @@ class StrategyMetricsOverview extends StatsOverviewWidget
             Stat::make('Drawdown máximo', $this->formatNegativeMoney($drawdown))
                 ->color($drawdown > 0 ? 'danger' : 'gray')
                 ->icon(Heroicon::OutlinedArrowTrendingDown),
+
+            Stat::make('Fator de recuperação', $recoveryFactor === null ? 'Sem drawdown' : $this->formatNumber($recoveryFactor))
+                ->color($this->ratioColor($recoveryFactor))
+                ->icon(Heroicon::OutlinedLifebuoy),
 
             Stat::make('Taxa de acerto', $this->formatPercent($winRate))
                 ->color($winRate > 0 ? 'success' : 'gray')

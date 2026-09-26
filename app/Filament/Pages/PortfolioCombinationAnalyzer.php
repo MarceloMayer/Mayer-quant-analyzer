@@ -214,9 +214,22 @@ class PortfolioCombinationAnalyzer extends Page
         $this->resetAnalysis();
     }
 
-    public function updatedStrategiesPerPortfolio(): void
+    public function updatedStrategiesPerPortfolio(mixed $value): void
     {
+        // wire:model.live on a typed `int` property: if the user clears the input,
+        // Livewire fails to assign '' and unsets the property entirely, which later
+        // throws PropertyNotFoundException when the property is read. Repair it here
+        // using the raw incoming value (Livewire always passes it, even when the
+        // property itself never got set).
+        $this->strategiesPerPortfolio = max(2, min(20, (int) $value));
+
         $this->resetAnalysis();
+    }
+
+    public function updatedInitialBalance(mixed $value): void
+    {
+        // Same typed-property gotcha as updatedStrategiesPerPortfolio() above.
+        $this->initialBalance = $value === '' || $value === null ? 0.0 : (float) $value;
     }
 
     public function updatedAssetFilter(): void

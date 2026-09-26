@@ -27,15 +27,9 @@ class PortfolioResultsPage extends ViewRecord
 
     protected static ?string $title = 'Resultados do Portfólio';
 
-    public string $correlationPeriod = PortfolioCorrelationService::PERIOD_MONTHLY;
+    public string $correlationPeriod = PortfolioCorrelationService::PERIOD_DAILY;
 
     public string $correlationMetric = PortfolioCorrelationService::METRIC_PROFIT_LOSS;
-
-    public string $dailyFilter = 'all';
-
-    public int $dailyPerPage = 15;
-
-    public int $dailyPage = 1;
 
     public string $selectedMonthlyYear = 'all';
 
@@ -60,7 +54,6 @@ class PortfolioResultsPage extends ViewRecord
                         return [
                             'portfolio' => $this->portfolio(),
                             'metrics' => $metrics,
-                            'dailyTable' => $this->dailyTable($metrics['daily_performance'] ?? []),
                             'correlation' => $this->correlation(),
                             'weightSuggestion' => $this->weightSuggestion,
                             'selectedMonthlyYear' => $this->selectedMonthlyYear,
@@ -170,52 +163,6 @@ class PortfolioResultsPage extends ViewRecord
             ->filter(fn (array $month): bool => $month['trade_count'] > 0)
             ->values()
             ->all();
-    }
-
-    public function updatedDailyFilter(): void
-    {
-        $this->dailyPage = 1;
-    }
-
-    public function updatedDailyPerPage(): void
-    {
-        $this->dailyPage = 1;
-    }
-
-    public function previousDailyPage(): void
-    {
-        $this->dailyPage = max(1, $this->dailyPage - 1);
-    }
-
-    public function nextDailyPage(): void
-    {
-        $this->dailyPage++;
-    }
-
-    /**
-     * @param  array<string, mixed>  $dailyPerformance
-     * @return array{rows: array<int, array<string, mixed>>, total: int, current_page: int, last_page: int, per_page: int}
-     */
-    private function dailyTable(array $dailyPerformance): array
-    {
-        $rows = collect($dailyPerformance['rows'] ?? []);
-
-        if ($this->dailyFilter !== 'all') {
-            $rows = $rows->where('classification', $this->dailyFilter);
-        }
-
-        $perPage = max(1, $this->dailyPerPage);
-        $total = $rows->count();
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $this->dailyPage = min(max(1, $this->dailyPage), $lastPage);
-
-        return [
-            'rows' => $rows->slice(($this->dailyPage - 1) * $perPage, $perPage)->values()->all(),
-            'total' => $total,
-            'current_page' => $this->dailyPage,
-            'last_page' => $lastPage,
-            'per_page' => $perPage,
-        ];
     }
 
     protected function getHeaderActions(): array

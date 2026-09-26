@@ -12,16 +12,12 @@
         'consistency_score'       => 'Score',
         'total_net_profit'        => 'Lucro Líquido',
         'max_drawdown'            => 'Drawdown',
-        'max_drawdown_percent'    => 'DD %',
         'profit_factor'           => 'Prof. Factor',
         'payoff'                  => 'Payoff',
         'win_rate'                => 'Win Rate',
         'positive_months_percent' => 'Meses +',
         'ulcer_index'             => 'Ulcer',
         'equity_r2'               => 'R²',
-        'net_profit_to_drawdown'  => 'L/DD',
-        'strategies_count'        => 'Qtd Est.',
-        'total_trades'            => 'Trades',
     ];
 @endphp
 
@@ -194,11 +190,11 @@
 .dark .pca-btn-ghost:hover { background: rgb(31 41 55); }
 
 .pca-table-wrap { overflow-x: auto; }
-.pca-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.pca-table { width: 100%; border-collapse: collapse; font-size: 0.625rem; }
 .pca-table th {
-    padding: 0.5rem 0.625rem;
+    padding: 0.3rem 0.3rem;
     text-align: left;
-    font-size: 0.75rem;
+    font-size: 0.6rem;
     font-weight: 600;
     color: rgb(107 114 128);
     background: rgb(249 250 251);
@@ -213,10 +209,11 @@
 .pca-table th.sortable:hover { color: rgb(59 130 246); }
 .pca-table th.sort-active { color: rgb(59 130 246); }
 .pca-table td {
-    padding: 0.5rem 0.625rem;
+    padding: 0.3rem 0.3rem;
     border-bottom: 1px solid rgb(243 244 246);
     color: rgb(55 65 81);
     vertical-align: middle;
+    white-space: nowrap;
 }
 .dark .pca-table td { color: rgb(209 213 219); border-color: rgb(31 41 55); }
 .pca-table tr:last-child td { border-bottom: none; }
@@ -228,10 +225,10 @@
 .pca-score-high { color: rgb(22 163 74); font-weight: 700; }
 .pca-score-mid  { color: rgb(202 138 4); font-weight: 600; }
 .pca-score-low  { color: rgb(220 38 38); font-weight: 600; }
-.pca-tag-list { display: flex; flex-wrap: wrap; gap: 0.25rem; max-width: 220px; }
+.pca-tag-list { display: flex; flex-wrap: wrap; gap: 0.2rem; max-width: 128px; white-space: normal; }
 .pca-tag {
-    font-size: 0.6875rem;
-    padding: 0.125rem 0.375rem;
+    font-size: 0.575rem;
+    padding: 0.1rem 0.25rem;
     background: rgb(239 246 255);
     color: rgb(29 78 216);
     border-radius: 9999px;
@@ -239,6 +236,9 @@
 }
 .dark .pca-tag { background: rgb(30 58 138 / .4); color: rgb(147 197 253); }
 .pca-row-number { color: rgb(156 163 175); font-size: 0.75rem; text-align: right; padding-right: 0.25rem; }
+.pca-actions-stack { display: flex; flex-direction: column; gap: 0.25rem; }
+.pca-actions-stack .pca-btn { width: 100%; justify-content: center; }
+.pca-actions-stack .pca-btn-sm { padding: 0.15rem 0.2rem; font-size: 0.625rem; }
 .dark .pca-legend-title { color: rgb(249 250 251) !important; }
 .dark .pca-legend-desc  { color: rgb(156 163 175) !important; }
 
@@ -415,9 +415,6 @@
 .pca-progress-hint { margin: .5rem 0 0; font-size: .75rem; color: rgb(107 114 128); }
 .dark .pca-progress-hint { color: rgb(156 163 175); }
 
-/* ---------- Sparkline column ---------- */
-.pca-spark { width: 72px; height: 24px; display: block; }
-.pca-spark path { fill: none; stroke: rgb(59 130 246); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .pca-table tbody tr { cursor: pointer; }
 .pca-table tbody tr.pca-row-active td { background: rgb(239 246 255); }
 .dark .pca-table tbody tr.pca-row-active td { background: rgb(30 58 138 / .3); }
@@ -697,16 +694,14 @@
                     <table class="pca-table">
                         <thead>
                             <tr>
-                                <th style="width:2.5rem;text-align:center;">
+                                <th style="width:1.5rem;text-align:center;">
                                     <input
                                         type="checkbox"
                                         style="width:1rem;height:1rem;accent-color:rgb(59 130 246);"
                                         @change="$event.target.checked ? $wire.selectAllResults() : $wire.deselectAllResults()"
                                     >
                                 </th>
-                                <th style="width:2.5rem;">#</th>
-                                <th>Estratégias</th>
-                                <th style="width:5rem;">Curva</th>
+                                <th style="width:16rem;">Estratégias</th>
                                 @foreach ($columns as $col => $label)
                                     <th
                                         class="sortable {{ $sortColumn === $col ? 'sort-active' : '' }}"
@@ -719,7 +714,7 @@
                                         @endif
                                     </th>
                                 @endforeach
-                                <th style="width:9rem;">Ações</th>
+                                <th style="width:3.5rem;">Ações</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -736,17 +731,6 @@
                                         ? $names
                                         : array_slice($names, 0, 2);
                                     $extraCount = count($names) > 3 ? count($names) - 2 : 0;
-
-                                    $spark = (array) ($result['spark'] ?? []);
-                                    $sparkPath = '';
-                                    if (count($spark) >= 2) {
-                                        $stepX = 100 / (count($spark) - 1);
-                                        foreach (array_values($spark) as $si => $sv) {
-                                            $x = round($si * $stepX, 2);
-                                            $y = round(28 - ((float) $sv * 24) - 2, 2);
-                                            $sparkPath .= ($si === 0 ? 'M' : 'L') . $x . ',' . $y . ' ';
-                                        }
-                                    }
                                 @endphp
                                 <tr
                                     wire:click="previewCombination('{{ $hash }}')"
@@ -761,7 +745,6 @@
                                             value="{{ $hash }}"
                                         >
                                     </td>
-                                    <td class="pca-row-number">{{ ($currentPage - 1) * $resultsPerPage + $i + 1 }}</td>
                                     <td>
                                         <div class="pca-tag-list">
                                             @foreach ($displayNames as $n)
@@ -772,15 +755,6 @@
                                             @endif
                                         </div>
                                     </td>
-                                    <td>
-                                        @if ($sparkPath !== '')
-                                            <svg class="pca-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
-                                                <path d="{{ $sparkPath }}" />
-                                            </svg>
-                                        @else
-                                            <span style="color:rgb(156 163 175);font-size:.75rem;">—</span>
-                                        @endif
-                                    </td>
 
                                     {{-- Score --}}
                                     <td><span class="{{ $scoreClass }}">{{ $fmt($score) }}</span></td>
@@ -790,9 +764,6 @@
 
                                     {{-- Drawdown --}}
                                     <td class="pca-profit-neg">{{ $fmtMoney($result['max_drawdown']) }}</td>
-
-                                    {{-- DD % --}}
-                                    <td class="pca-profit-neg">{{ $fmtPct($result['max_drawdown_percent']) }}</td>
 
                                     {{-- Profit Factor --}}
                                     <td>{{ $fmtNull($result['profit_factor']) }}</td>
@@ -817,18 +788,9 @@
                                     {{-- R² --}}
                                     <td>{{ $fmt($result['equity_r2'], 4) }}</td>
 
-                                    {{-- L/DD --}}
-                                    <td>{{ $fmtNull($result['net_profit_to_drawdown'], 'x') }}</td>
-
-                                    {{-- Qtd Est. --}}
-                                    <td style="text-align:center;">{{ $result['strategies_count'] }}</td>
-
-                                    {{-- Trades --}}
-                                    <td style="text-align:center;">{{ number_format($result['total_trades'], 0, ',', '.') }}</td>
-
                                     {{-- Ações --}}
                                     <td @click.stop>
-                                        <div style="display:flex;gap:.375rem;">
+                                        <div class="pca-actions-stack">
                                             <button
                                                 class="pca-btn pca-btn-ghost pca-btn-sm"
                                                 wire:click="previewCombination('{{ $hash }}')"
@@ -849,7 +811,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="{{ count($columns) + 5 }}" style="text-align:center;padding:2rem;color:rgb(107 114 128);">
+                                    <td colspan="{{ count($columns) + 3 }}" style="text-align:center;padding:2rem;color:rgb(107 114 128);">
                                         Nenhuma combinação encontrada.
                                     </td>
                                 </tr>

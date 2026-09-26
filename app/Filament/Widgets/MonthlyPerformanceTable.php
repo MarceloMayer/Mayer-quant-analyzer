@@ -71,7 +71,7 @@ class MonthlyPerformanceTable extends Widget
 
         $value = (float) $value;
 
-        return ($value > 0 ? '+' : ($value < 0 ? '-' : '')).'R$ '.number_format(abs($value), 2, ',', '.');
+        return ($value > 0 ? '+' : ($value < 0 ? '-' : '')).number_format(abs($value), 0, ',', '.');
     }
 
     public function valueClasses(mixed $value, bool $isYtd = false): string

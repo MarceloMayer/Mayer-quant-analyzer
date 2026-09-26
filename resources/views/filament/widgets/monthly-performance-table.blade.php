@@ -44,6 +44,17 @@
             color: rgb(156 163 175);
         }
 
+        .mqa-report-unit {
+            margin-top: 0.25rem;
+            color: rgb(107 114 128);
+            font-size: 0.6875rem;
+            line-height: 1rem;
+        }
+
+        .dark .mqa-report-unit {
+            color: rgb(156 163 175);
+        }
+
         .mqa-table-scroll {
             overflow-x: auto;
             padding: 1rem;
@@ -51,17 +62,17 @@
 
         .mqa-financial-table {
             width: 100%;
-            min-width: 1680px;
+            min-width: 760px;
             border-collapse: collapse;
             table-layout: fixed;
-            font-size: 0.8125rem;
-            line-height: 1.25rem;
+            font-size: 0.6875rem;
+            line-height: 1rem;
         }
 
         .mqa-financial-table th,
         .mqa-financial-table td {
             border: 1px solid rgb(229 231 235);
-            padding: 0.625rem 0.75rem;
+            padding: 0.3rem 0.3rem;
             white-space: nowrap;
             font-variant-numeric: tabular-nums;
         }
@@ -158,18 +169,19 @@
                 @if (filled($description))
                     <p class="mqa-report-description">{{ $description }}</p>
                 @endif
+
+                <p class="mqa-report-unit">Valores em R$, sem centavos.</p>
             </div>
         @endif
 
-        <p class="mqa-scroll-hint">Deslize a tabela para ver todos os meses.</p>
         <div class="mqa-table-scroll" tabindex="0" role="region" aria-label="Tabela de desempenho mensal">
             <table class="mqa-financial-table">
                 <colgroup>
-                    <col style="width: 96px;">
+                    <col style="width: 44px;">
                     @foreach ($this->months() as $month)
-                        <col style="width: 126px;">
+                        <col style="width: 58px;">
                     @endforeach
-                    <col style="width: 148px;">
+                    <col style="width: 72px;">
                 </colgroup>
                 <thead>
                     <tr>

@@ -16,6 +16,7 @@ use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Filament\Support\RawJs;
 
 class StrategyExecutionAnalysisPage extends ViewRecord
 {
@@ -146,21 +147,12 @@ class StrategyExecutionAnalysisPage extends ViewRecord
 
         return [
             'name' => $execution->name,
-            'execution_type' => $execution->execution_type,
             'strategy_version' => $execution->strategy_version,
             'asset' => $execution->asset,
             'symbol' => $execution->symbol,
-            'timeframe' => $execution->timeframe,
             'started_at' => $execution->started_at?->toDateString(),
             'ended_at' => $execution->ended_at?->toDateString(),
             'initial_capital' => $execution->initial_capital,
-            'initial_contracts' => $execution->initial_contracts,
-            'parameters' => $execution->parameters === null ? null : json_encode($execution->parameters, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
-            'costs_description' => data_get($execution->costs, 'observacoes'),
-            'slippage' => $execution->slippage,
-            'spread' => $execution->spread,
-            'data_source' => $execution->data_source,
-            'notes' => $execution->notes,
         ];
     }
 
@@ -173,11 +165,6 @@ class StrategyExecutionAnalysisPage extends ViewRecord
             TextInput::make('name')
                 ->label('Nome da execução')
                 ->maxLength(255),
-            Select::make('execution_type')
-                ->label('Tipo da execução')
-                ->options(StrategyBacktestExecution::executionTypeOptions())
-                ->native(false)
-                ->required(),
             TextInput::make('strategy_version')
                 ->label('Versão da estratégia')
                 ->maxLength(255),
@@ -186,9 +173,6 @@ class StrategyExecutionAnalysisPage extends ViewRecord
                 ->maxLength(255),
             TextInput::make('symbol')
                 ->label('Símbolo')
-                ->maxLength(255),
-            TextInput::make('timeframe')
-                ->label('Timeframe')
                 ->maxLength(255),
             TextInput::make('started_at')
                 ->label('Data inicial')
@@ -200,32 +184,15 @@ class StrategyExecutionAnalysisPage extends ViewRecord
                 ->maxLength(10),
             TextInput::make('initial_capital')
                 ->label('Capital inicial')
-                ->numeric(),
-            TextInput::make('initial_contracts')
-                ->label('Quantidade inicial de contratos')
-                ->numeric(),
-            Textarea::make('parameters')
-                ->label('Parâmetros utilizados')
-                ->helperText('JSON opcional. Se não for JSON, será preservado como texto.')
-                ->rows(5)
-                ->columnSpanFull(),
-            Textarea::make('costs_description')
-                ->label('Custos considerados')
-                ->rows(2)
-                ->columnSpanFull(),
-            TextInput::make('slippage')
-                ->label('Slippage')
-                ->numeric(),
-            TextInput::make('spread')
-                ->label('Spread')
-                ->numeric(),
-            TextInput::make('data_source')
-                ->label('Origem dos dados')
-                ->maxLength(255),
-            Textarea::make('notes')
-                ->label('Observações')
-                ->rows(3)
-                ->columnSpanFull(),
+                ->prefix('R$')
+                ->placeholder('0,00')
+                ->mask(RawJs::make("\$money(\$input, ',', '.')"))
+                ->formatStateUsing(fn (mixed $state): ?string => filled($state)
+                    ? number_format((float) $state, 2, ',', '.')
+                    : null)
+                ->dehydrateStateUsing(fn (?string $state): ?float => filled($state)
+                    ? (float) str_replace(['.', ','], ['', '.'], $state)
+                    : null),
         ];
     }
 
@@ -234,52 +201,19 @@ class StrategyExecutionAnalysisPage extends ViewRecord
      */
     private function updateExecution(array $data): void
     {
-        $costs = $this->execution()->costs ?? [];
-
-        if (filled($data['costs_description'] ?? null)) {
-            $costs['observacoes'] = trim((string) $data['costs_description']);
-        }
-
         $this->execution()->update([
             'name' => $data['name'] ?? null,
-            'execution_type' => $data['execution_type'] ?? StrategyBacktestExecution::TYPE_MAIN_BACKTEST,
             'strategy_version' => $data['strategy_version'] ?? null,
             'asset' => $data['asset'] ?? null,
             'symbol' => $data['symbol'] ?? null,
-            'timeframe' => $data['timeframe'] ?? null,
             'started_at' => $data['started_at'] ?? null,
             'ended_at' => $data['ended_at'] ?? null,
             'initial_capital' => $data['initial_capital'] ?? null,
-            'initial_contracts' => $data['initial_contracts'] ?? null,
-            'parameters' => $this->parameters($data['parameters'] ?? null),
-            'costs' => $costs === [] ? null : $costs,
-            'slippage' => $data['slippage'] ?? null,
-            'spread' => $data['spread'] ?? null,
-            'data_source' => $data['data_source'] ?? null,
-            'notes' => $data['notes'] ?? null,
         ]);
 
         Notification::make()
             ->title('Execução atualizada')
             ->success()
             ->send();
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function parameters(mixed $value): ?array
-    {
-        if (! is_string($value) || trim($value) === '') {
-            return null;
-        }
-
-        try {
-            $decoded = json_decode($value, true, flags: JSON_THROW_ON_ERROR);
-        } catch (\Throwable) {
-            return ['texto' => trim($value)];
-        }
-
-        return is_array($decoded) ? $decoded : null;
     }
 }

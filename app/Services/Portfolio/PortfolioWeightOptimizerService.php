@@ -11,9 +11,21 @@ use App\Services\Metrics\DrawdownCalculator;
  * Searches for per-strategy weights that improve a chosen objective for a portfolio,
  * keeping every enabled strategy in the mix (weights stay within [min, max]).
  *
- * Two objectives are supported, matching the metrics traders asked to steer by:
- *   - ulcer_index            → minimize (depth + duration of drawdowns)
+ * Four objectives are supported, matching the metrics traders asked to steer by:
+ *   - ulcer_index             → minimize (depth + duration of drawdowns)
  *   - positive_months_percent → maximize (share of months in the green)
+ *   - net_profit_to_drawdown  → maximize (Recovery Factor: net profit / max drawdown)
+ *   - max_drawdown_percent    → minimize (deepest peak-to-valley drop, as % of the peak)
+ *
+ * max_drawdown_percent (not the raw money drawdown) is what gets optimized here on
+ * purpose: weights can only go down to 1 contract, never to 0, so once every strategy
+ * is already at the floor, absolute-money drawdown can't be reduced further by the grid
+ * search — scaling every weight down together always shrinks it, and there is nowhere
+ * left to scale down to. The percentage figure is scale-invariant, so the search is free
+ * to explore the RATIO between strategies (not just the overall exposure) and can surface
+ * real diversification gains: two strategies whose drawdowns fall in different periods can
+ * offset each other in the consolidated curve, which shows up as a lower percentage even
+ * when nobody's weight is reduced.
  *
  * Weights are whole numbers only: a weight is a contract multiplier and BM&F mini
  * contracts (mini-índice / mini-dólar) trade in whole units, so 0.5 or 1.5 make no
@@ -31,6 +43,10 @@ class PortfolioWeightOptimizerService
     public const OBJECTIVE_ULCER = 'ulcer_index';
 
     public const OBJECTIVE_POSITIVE_MONTHS = 'positive_months_percent';
+
+    public const OBJECTIVE_RECOVERY_FACTOR = 'net_profit_to_drawdown';
+
+    public const OBJECTIVE_MAX_DRAWDOWN = 'max_drawdown_percent';
 
     private const GRID_STEP = 1;
 
@@ -60,6 +76,8 @@ class PortfolioWeightOptimizerService
         return [
             self::OBJECTIVE_ULCER => 'Ulcer Index (menor é melhor)',
             self::OBJECTIVE_POSITIVE_MONTHS => '% de meses positivos (maior é melhor)',
+            self::OBJECTIVE_RECOVERY_FACTOR => 'Fator de Recuperação (maior é melhor)',
+            self::OBJECTIVE_MAX_DRAWDOWN => 'Drawdown Máximo % (menor é melhor)',
         ];
     }
 
@@ -146,7 +164,7 @@ class PortfolioWeightOptimizerService
 
     /**
      * @param  int[]  $strategyIds
-     * @return array<int, array{strategy_id: int, net_profit: float, month_key: string}>
+     * @return array<int, array{strategy_id: int, net_profit: float, month_key: string, day_key: string}>
      */
     private function orderedTrades(array $strategyIds): array
     {
@@ -160,6 +178,7 @@ class PortfolioWeightOptimizerService
                 'strategy_id' => (int) $trade->strategy_id,
                 'net_profit' => (float) $trade->net_profit,
                 'month_key' => $trade->exit_time?->format('Y-m') ?? '',
+                'day_key' => $trade->exit_time?->format('Y-m-d') ?? '',
             ])
             ->all();
     }
@@ -167,15 +186,17 @@ class PortfolioWeightOptimizerService
     /**
      * Single-pass weighted equity reconstruction. Returns just what the objective needs.
      *
-     * @param  array<int, array{strategy_id: int, net_profit: float, month_key: string}>  $trades
+     * @param  array<int, array{strategy_id: int, net_profit: float, month_key: string, day_key: string}>  $trades
      * @param  array<int, float>  $weights
-     * @return array{ulcer_index: float, positive_months_percent: float, net_profit: float}
+     * @return array{ulcer_index: float, positive_months_percent: float, net_profit: float, max_drawdown: float, max_drawdown_percent: float}
      */
     private function fastMetrics(array $trades, array $weights, float $baseline): array
     {
         $cum = 0.0;
         $peak = $baseline;
         $sumDrawdownSquared = 0.0;
+        $maxDrawdown = 0.0;
+        $maxDrawdownPercent = 0.0;
         $points = 0;
         $months = [];
 
@@ -189,7 +210,10 @@ class PortfolioWeightOptimizerService
 
             $equity = $baseline + $cum;
             $peak = max($peak, $equity);
-            $drawdownPercent = $peak > 0 ? (($peak - $equity) / $peak) * 100 : 0.0;
+            $drawdown = $peak - $equity;
+            $maxDrawdown = max($maxDrawdown, $drawdown);
+            $drawdownPercent = $peak > 0 ? ($drawdown / $peak) * 100 : 0.0;
+            $maxDrawdownPercent = max($maxDrawdownPercent, $drawdownPercent);
             $sumDrawdownSquared += $drawdownPercent ** 2;
             $points++;
         }
@@ -201,13 +225,15 @@ class PortfolioWeightOptimizerService
             'ulcer_index' => $points > 0 ? sqrt($sumDrawdownSquared / $points) : 0.0,
             'positive_months_percent' => $monthsWithTrades > 0 ? ($positiveMonths / $monthsWithTrades) * 100 : 0.0,
             'net_profit' => $cum,
+            'max_drawdown' => $maxDrawdown,
+            'max_drawdown_percent' => $maxDrawdownPercent,
         ];
     }
 
     /**
      * Recomputes the metrics shown to the user with the same calculators the rest of the app uses.
      *
-     * @param  array<int, array{strategy_id: int, net_profit: float, month_key: string}>  $trades
+     * @param  array<int, array{strategy_id: int, net_profit: float, month_key: string, day_key: string}>  $trades
      * @param  array<int, float>  $weights
      * @return array<string, float>
      */
@@ -216,6 +242,9 @@ class PortfolioWeightOptimizerService
         $cum = 0.0;
         $curve = [];
         $months = [];
+        $days = [];
+        $grossProfit = 0.0;
+        $grossLoss = 0.0;
 
         foreach ($trades as $trade) {
             $weighted = $trade['net_profit'] * ($weights[$trade['strategy_id']] ?? 0.0);
@@ -224,6 +253,16 @@ class PortfolioWeightOptimizerService
 
             if ($trade['month_key'] !== '') {
                 $months[$trade['month_key']] = ($months[$trade['month_key']] ?? 0.0) + $weighted;
+            }
+
+            if ($trade['day_key'] !== '') {
+                $days[$trade['day_key']] = ($days[$trade['day_key']] ?? 0.0) + $weighted;
+            }
+
+            if ($weighted > 0) {
+                $grossProfit += $weighted;
+            } elseif ($weighted < 0) {
+                $grossLoss += abs($weighted);
             }
         }
 
@@ -234,6 +273,10 @@ class PortfolioWeightOptimizerService
         $absDrawdown = abs((float) $drawdown['max_drawdown']);
         $monthsWithTrades = count($months);
         $positiveMonths = count(array_filter($months, fn (float $value): bool => $value > 0));
+        // Same classification as PortfolioDailyPerformanceService: a day counts by the
+        // sign of its summed (weighted) net profit, not by trade count.
+        $positiveDays = count(array_filter($days, fn (float $value): bool => $value > 0));
+        $negativeDays = count(array_filter($days, fn (float $value): bool => $value < 0));
 
         return [
             'net_profit' => $netProfit,
@@ -247,11 +290,16 @@ class PortfolioWeightOptimizerService
             'positive_months_percent' => $monthsWithTrades > 0
                 ? round(($positiveMonths / $monthsWithTrades) * 100, 2)
                 : 0.0,
+            'profit_factor' => $grossLoss > 0
+                ? round($grossProfit / $grossLoss, 2)
+                : ($grossProfit > 0 ? 100.0 : 0.0),
+            'positive_days' => (float) $positiveDays,
+            'negative_days' => (float) $negativeDays,
         ];
     }
 
     /**
-     * @param  array{ulcer_index: float, positive_months_percent: float, net_profit: float}  $metrics
+     * @param  array{ulcer_index: float, positive_months_percent: float, net_profit: float, max_drawdown: float, max_drawdown_percent: float}  $metrics
      */
     private function objectiveValue(array $metrics, string $objective): float
     {
@@ -261,6 +309,14 @@ class PortfolioWeightOptimizerService
 
         return match ($objective) {
             self::OBJECTIVE_POSITIVE_MONTHS => $metrics['positive_months_percent'] + $tieBreak,
+            self::OBJECTIVE_RECOVERY_FACTOR => ($metrics['max_drawdown'] > 0
+                ? $metrics['net_profit'] / $metrics['max_drawdown']
+                : ($metrics['net_profit'] > 0 ? 100.0 : 0.0)) + $tieBreak,
+            // Percentage, not money: money drawdown can only shrink by scaling every
+            // weight down together, and weights are already floored at 1 contract, so
+            // that path is closed off. The percentage is scale-invariant, which lets the
+            // search reward a better RATIO between strategies — i.e. real diversification.
+            self::OBJECTIVE_MAX_DRAWDOWN => -$metrics['max_drawdown_percent'] + $tieBreak,
             default => -$metrics['ulcer_index'] + $tieBreak,
         };
     }
@@ -472,6 +528,30 @@ class PortfolioWeightOptimizerService
                 'suggested' => $suggested['positive_months_percent'],
                 'delta' => $delta,
                 'better' => $delta > 0,
+            ];
+        }
+
+        if ($objective === self::OBJECTIVE_RECOVERY_FACTOR) {
+            $delta = round($suggested['net_profit_to_drawdown'] - $current['net_profit_to_drawdown'], 2);
+
+            return [
+                'metric' => 'net_profit_to_drawdown',
+                'current' => $current['net_profit_to_drawdown'],
+                'suggested' => $suggested['net_profit_to_drawdown'],
+                'delta' => $delta,
+                'better' => $delta > 0,
+            ];
+        }
+
+        if ($objective === self::OBJECTIVE_MAX_DRAWDOWN) {
+            $delta = round($suggested['max_drawdown_percent'] - $current['max_drawdown_percent'], 2);
+
+            return [
+                'metric' => 'max_drawdown_percent',
+                'current' => $current['max_drawdown_percent'],
+                'suggested' => $suggested['max_drawdown_percent'],
+                'delta' => $delta,
+                'better' => $delta < 0,
             ];
         }
 

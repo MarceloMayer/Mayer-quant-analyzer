@@ -61,8 +61,8 @@ class StrategyBacktestExecutionUpsertService
             'started_at' => $this->earliestDate($execution->started_at, $startedAt),
             'ended_at' => $this->latestDate($execution->ended_at, $endedAt),
             'initial_capital' => $this->firstNumeric(
-                $executionData['initial_capital'] ?? null,
                 $metadata['initial_deposit'] ?? null,
+                $executionData['initial_capital'] ?? null,
                 $execution->initial_capital,
             ),
             'initial_contracts' => $this->firstNumeric(

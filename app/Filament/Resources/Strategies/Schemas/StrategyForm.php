@@ -32,6 +32,10 @@ class StrategyForm
                     ->label('Ativo')
                     ->options(Strategy::assetOptions())
                     ->native(false)
+                    ->default(fn (): ?string => Strategy::query()
+                        ->where('user_id', auth()->id())
+                        ->latest('id')
+                        ->value('asset'))
                     ->required(),
             ]);
     }

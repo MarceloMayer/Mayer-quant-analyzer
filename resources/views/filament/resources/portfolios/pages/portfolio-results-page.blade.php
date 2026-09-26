@@ -15,10 +15,8 @@
         }
     };
     $assetLabels = \App\Models\Strategy::assetOptions();
-    $consolidatedTrades = $metrics['consolidated_trades'] ?? [];
     $strategySummaries = $metrics['strategy_summaries'] ?? [];
     $dailyPerformance = $metrics['daily_performance'] ?? [];
-    $dailyTable = $dailyTable ?? ['rows' => [], 'total' => 0, 'current_page' => 1, 'last_page' => 1, 'per_page' => 15];
     $hasTrades = ($metrics['total_trades'] ?? 0) > 0;
     $correlationSummary = $correlation['summary'] ?? [];
 @endphp
@@ -88,6 +86,8 @@
             border: 1px solid rgb(229 231 235);
             padding: 0.625rem 0.75rem;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             font-variant-numeric: tabular-nums;
         }
 
@@ -697,18 +697,19 @@
 
         .mqa-correlation-table {
             width: 100%;
-            min-width: 760px;
             border-collapse: collapse;
             table-layout: fixed;
-            font-size: 0.8125rem;
-            line-height: 1.25rem;
+            font-size: 0.75rem;
+            line-height: 1.15rem;
         }
 
         .mqa-correlation-table th,
         .mqa-correlation-table td {
             border: 1px solid rgb(229 231 235);
-            padding: 0.625rem 0.75rem;
+            padding: 0.35rem 0.3rem;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             font-variant-numeric: tabular-nums;
         }
 
@@ -722,12 +723,23 @@
             background: rgb(243 244 246);
             color: rgb(55 65 81);
             font-weight: 700;
+            vertical-align: bottom;
         }
 
         .dark .mqa-correlation-table thead th,
         .dark .mqa-correlation-row-heading {
             background: rgb(31 41 55);
             color: rgb(229 231 235);
+        }
+
+        .mqa-correlation-col-heading {
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            text-align: left;
+            vertical-align: bottom;
+            height: 130px;
+            max-height: 130px;
+            font-size: 0.6875rem;
         }
 
         .mqa-correlation-cell {
@@ -840,9 +852,13 @@
                 ['key' => 'ulcer_index', 'label' => 'Ulcer Index', 'fmt' => 'ratio', 'lower_better' => true],
                 ['key' => 'positive_months_percent', 'label' => 'Meses positivos', 'fmt' => 'percent', 'lower_better' => false],
                 ['key' => 'max_drawdown', 'label' => 'Drawdown máximo', 'fmt' => 'money_neg', 'lower_better' => true],
+                ['key' => 'max_drawdown_percent', 'label' => 'Drawdown máximo %', 'fmt' => 'percent', 'lower_better' => true],
                 ['key' => 'net_profit', 'label' => 'Resultado líquido', 'fmt' => 'money', 'lower_better' => false],
-                ['key' => 'net_profit_to_drawdown', 'label' => 'Lucro / Drawdown', 'fmt' => 'ratio', 'lower_better' => false],
+                ['key' => 'net_profit_to_drawdown', 'label' => 'Fator de Recuperação', 'fmt' => 'ratio', 'lower_better' => false],
+                ['key' => 'profit_factor', 'label' => 'Fator de lucro', 'fmt' => 'ratio', 'lower_better' => false],
                 ['key' => 'equity_r2', 'label' => 'R² da curva', 'fmt' => 'ratio4', 'lower_better' => false],
+                ['key' => 'positive_days', 'label' => 'Dias positivos', 'fmt' => 'integer', 'lower_better' => false],
+                ['key' => 'negative_days', 'label' => 'Dias negativos', 'fmt' => 'integer', 'lower_better' => true],
             ];
             $wsFmt = function (string $fmt, mixed $value) use ($formatMoney, $formatSignedMoney, $formatPercent): string {
                 return match ($fmt) {
@@ -850,6 +866,7 @@
                     'money_neg' => (float) $value > 0 ? '-' . $formatMoney($value) : $formatMoney(0),
                     'percent' => $formatPercent($value),
                     'ratio4' => number_format((float) $value, 4, ',', '.'),
+                    'integer' => number_format((float) $value, 0, ',', '.'),
                     default => number_format((float) $value, 2, ',', '.'),
                 };
             };
@@ -1140,42 +1157,9 @@
                     </div>
 
                     <div class="mqa-daily-card">
-                        <div class="mqa-daily-label">Resultado dos dias positivos</div>
-                        <div class="mqa-daily-value mqa-daily-positive">{{ $formatSignedMoney($dailyPerformance['positive_days_net_profit'] ?? 0) }}</div>
-                        <div class="mqa-daily-description">Soma dos dias positivos</div>
-                    </div>
-
-                    <div class="mqa-daily-card">
-                        <div class="mqa-daily-label">Resultado dos dias negativos</div>
-                        <div class="mqa-daily-value mqa-daily-negative">{{ $formatSignedMoney($dailyPerformance['negative_days_net_profit'] ?? 0) }}</div>
-                        <div class="mqa-daily-description">Soma dos dias negativos</div>
-                    </div>
-
-                    <div class="mqa-daily-card">
                         <div class="mqa-daily-label">Total de dias operacionais</div>
                         <div class="mqa-daily-value">{{ number_format((int) ($dailyPerformance['total_days'] ?? 0), 0, ',', '.') }}</div>
                         <div class="mqa-daily-description">Dias com pelo menos um trade fechado</div>
-                    </div>
-
-                    <div class="mqa-daily-card">
-                        <div class="mqa-daily-label">Sequência atual</div>
-                        @php
-                            $currentStreakType = $dailyPerformance['current_streak_type'] ?? null;
-                            $currentStreakCount = (int) ($dailyPerformance['current_streak_count'] ?? 0);
-                            $currentStreakClass = match ($currentStreakType) {
-                                'positive' => 'mqa-daily-positive',
-                                'negative' => 'mqa-daily-negative',
-                                default => 'mqa-daily-neutral',
-                            };
-                        @endphp
-                        <div class="mqa-daily-value {{ $currentStreakClass }}">{{ $currentStreakCount > 0 ? $currentStreakCount : '-' }}</div>
-                        <div class="mqa-daily-description">
-                            {{ match ($currentStreakType) {
-                                'positive' => 'dias positivos seguidos até o último dia',
-                                'negative' => 'dias negativos seguidos até o último dia',
-                                default => 'Sem sequência em andamento',
-                            } }}
-                        </div>
                     </div>
 
                     <div class="mqa-daily-card">
@@ -1188,104 +1172,6 @@
                         <div class="mqa-daily-label">Maior sequência negativa</div>
                         <div class="mqa-daily-value mqa-daily-negative">{{ number_format((int) ($dailyPerformance['max_negative_streak'] ?? 0), 0, ',', '.') }}</div>
                         <div class="mqa-daily-description">Dias negativos consecutivos, no máximo</div>
-                    </div>
-                </div>
-
-                <div class="mqa-correlation-toolbar">
-                    <div class="mqa-correlation-filter-group">
-                        <label class="mqa-correlation-field">
-                            <span class="mqa-correlation-label">Classificação</span>
-                            <select wire:model.live="dailyFilter" class="mqa-correlation-select">
-                                <option value="all">Todos os dias</option>
-                                <option value="positive">Somente positivos</option>
-                                <option value="negative">Somente negativos</option>
-                                <option value="neutral">Somente neutros</option>
-                            </select>
-                        </label>
-
-                        <label class="mqa-correlation-field">
-                            <span class="mqa-correlation-label">Dias por página</span>
-                            <select wire:model.live="dailyPerPage" class="mqa-correlation-select">
-                                <option value="15">15</option>
-                                <option value="30">30</option>
-                                <option value="60">60</option>
-                                <option value="9999">Todos</option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="mqa-strategy-scroll" tabindex="0" role="region" aria-label="Tabela de resultado diário do portfólio">
-                    <table class="mqa-daily-table">
-                        <colgroup>
-                            <col style="width: 130px;">
-                            <col style="width: 140px;">
-                            <col style="width: 120px;">
-                            <col style="width: 160px;">
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th class="mqa-left">Data</th>
-                                <th class="mqa-right">Resultado</th>
-                                <th class="mqa-right">Trades</th>
-                                <th class="mqa-left">Classificação</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse ($dailyTable['rows'] as $day)
-                                @php
-                                    $classification = $day['classification'] ?? 'neutral';
-                                    $classificationLabel = match ($classification) {
-                                        'positive' => 'Positivo',
-                                        'negative' => 'Negativo',
-                                        default => 'Neutro',
-                                    };
-                                    $profitClass = match (true) {
-                                        (float) ($day['net_profit'] ?? 0) > 0 => 'mqa-profit-positive',
-                                        (float) ($day['net_profit'] ?? 0) < 0 => 'mqa-profit-negative',
-                                        default => 'mqa-profit-neutral',
-                                    };
-                                @endphp
-
-                                <tr>
-                                    <td class="mqa-left">{{ $formatDate($day['date'] ?? null) }}</td>
-                                    <td class="mqa-right {{ $profitClass }}">{{ $formatSignedMoney($day['net_profit'] ?? 0) }}</td>
-                                    <td class="mqa-right">{{ number_format((int) ($day['trades'] ?? 0), 0, ',', '.') }}</td>
-                                    <td class="mqa-left">
-                                        <span class="mqa-daily-badge mqa-daily-badge-{{ $classification }}">{{ $classificationLabel }}</span>
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td class="mqa-left" colspan="4">Nenhum dia encontrado para o filtro selecionado.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="mqa-pagination">
-                    <span class="mqa-pagination-info">
-                        @if ($dailyTable['total'] > 0)
-                            Mostrando {{ number_format((($dailyTable['current_page'] - 1) * $dailyTable['per_page']) + 1, 0, ',', '.') }}–{{ number_format(min($dailyTable['current_page'] * $dailyTable['per_page'], $dailyTable['total']), 0, ',', '.') }} de {{ number_format($dailyTable['total'], 0, ',', '.') }} dias
-                        @else
-                            Nenhum dia para exibir
-                        @endif
-                    </span>
-                    <div class="mqa-pagination-controls">
-                        <button
-                            type="button"
-                            wire:click="previousDailyPage"
-                            @disabled($dailyTable['current_page'] <= 1)
-                            class="mqa-pagination-button"
-                        >Anterior</button>
-                        <span class="mqa-pagination-page">Página {{ $dailyTable['current_page'] }} de {{ $dailyTable['last_page'] }}</span>
-                        <button
-                            type="button"
-                            wire:click="nextDailyPage"
-                            @disabled($dailyTable['current_page'] >= $dailyTable['last_page'])
-                            class="mqa-pagination-button"
-                        >Próxima</button>
                     </div>
                 </div>
             @endif
@@ -1394,20 +1280,19 @@
                         Não há períodos suficientes com trades fechados para calcular correlação.
                     </div>
                 @else
-                    <p class="mqa-scroll-hint">Deslize a tabela para comparar todas as estratégias.</p>
                     <div class="mqa-correlation-scroll" tabindex="0" role="region" aria-label="Matriz de correlação entre estratégias">
                         <table class="mqa-correlation-table">
                             <colgroup>
-                                <col style="width: 240px;">
+                                <col style="width: 130px;">
                                 @foreach (($correlation['strategies'] ?? []) as $strategy)
-                                    <col style="width: 132px;">
+                                    <col style="width: 36px;">
                                 @endforeach
                             </colgroup>
                             <thead>
                                 <tr>
                                     <th class="mqa-left">Estratégia</th>
                                     @foreach (($correlation['strategies'] ?? []) as $strategy)
-                                        <th class="mqa-right" title="{{ $strategy['name'] ?? '-' }}">{{ $strategy['name'] ?? '-' }}</th>
+                                        <th class="mqa-correlation-col-heading" title="{{ $strategy['name'] ?? '-' }}">{{ $strategy['name'] ?? '-' }}</th>
                                     @endforeach
                                 </tr>
                             </thead>
@@ -1475,7 +1360,7 @@
                         @endphp
 
                         <tr>
-                            <td class="mqa-left" style="font-weight: 650;">{{ $strategy['name'] ?? '-' }}</td>
+                            <td class="mqa-left" style="font-weight: 650;" title="{{ $strategy['name'] ?? '-' }}">{{ $strategy['name'] ?? '-' }}</td>
                             <td class="mqa-left">{{ $assetLabels[$strategy['asset'] ?? null] ?? $strategy['asset'] ?? '-' }}</td>
                             <td class="mqa-left">
                                 <span class="mqa-badge {{ ($strategy['enabled'] ?? false) ? 'mqa-badge-active' : 'mqa-badge-inactive' }}">
@@ -1497,8 +1382,4 @@
             </table>
         </div>
     </section>
-
-    @livewire(\App\Filament\Widgets\PortfolioConsolidatedTradesTable::class, [
-        'trades' => $consolidatedTrades,
-    ])
 </div>

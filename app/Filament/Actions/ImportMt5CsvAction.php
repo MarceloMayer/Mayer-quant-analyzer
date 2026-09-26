@@ -8,12 +8,11 @@ use App\Services\Imports\Mt5MultipleReportImportService;
 use App\Services\Imports\TradeImportService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ImportMt5CsvAction
 {
@@ -44,53 +43,13 @@ class ImportMt5CsvAction
                 TextInput::make('backtest_id')
                     ->label('Identificador do backtest')
                     ->helperText('Use o mesmo identificador para importar relatórios XLSX de períodos diferentes do mesmo backtest.')
-                    ->default(fn (?Strategy $record): ?string => $record?->id === null ? null : 'strategy-'.$record->id)
+                    ->default(fn (?Strategy $record): ?string => self::defaultBacktestId($record))
                     ->required(),
                 TextInput::make('execution_name')
                     ->label('Nome da execução')
                     ->placeholder('Ex.: Backtest principal 2020-2024')
+                    ->default(fn (?Strategy $record): ?string => $record?->name)
                     ->maxLength(255),
-                Select::make('execution_type')
-                    ->label('Tipo da execução')
-                    ->options(StrategyBacktestExecution::executionTypeOptions())
-                    ->default(StrategyBacktestExecution::TYPE_MAIN_BACKTEST)
-                    ->native(false)
-                    ->required(),
-                TextInput::make('strategy_version')
-                    ->label('Versão da estratégia')
-                    ->maxLength(255),
-                TextInput::make('timeframe')
-                    ->label('Timeframe')
-                    ->maxLength(255),
-                TextInput::make('initial_capital')
-                    ->label('Capital inicial')
-                    ->numeric(),
-                TextInput::make('initial_contracts')
-                    ->label('Quantidade inicial de contratos')
-                    ->numeric(),
-                TextInput::make('slippage')
-                    ->label('Slippage')
-                    ->numeric(),
-                TextInput::make('spread')
-                    ->label('Spread')
-                    ->numeric(),
-                TextInput::make('data_source')
-                    ->label('Origem dos dados')
-                    ->default('MetaTrader 5')
-                    ->maxLength(255),
-                Textarea::make('parameters')
-                    ->label('Parâmetros utilizados')
-                    ->helperText('JSON opcional. Se não for JSON, o texto será preservado como observação de parâmetros.')
-                    ->rows(4)
-                    ->columnSpanFull(),
-                Textarea::make('costs_description')
-                    ->label('Custos considerados')
-                    ->rows(2)
-                    ->columnSpanFull(),
-                Textarea::make('notes')
-                    ->label('Observações da execução')
-                    ->rows(3)
-                    ->columnSpanFull(),
                 FileUpload::make('csv_file')
                     ->label('Arquivos CSV ou XLSX')
                     ->disk('local')
@@ -107,6 +66,27 @@ class ImportMt5CsvAction
                     ])
                     ->required(),
             ]);
+    }
+
+    private static function defaultBacktestId(?Strategy $record): ?string
+    {
+        if ($record?->id === null) {
+            return null;
+        }
+
+        $lastBacktestId = StrategyBacktestExecution::query()
+            ->where('strategy_id', $record->id)
+            ->latest('id')
+            ->value('backtest_id');
+
+        return $lastBacktestId ?? self::fallbackBacktestId($record);
+    }
+
+    private static function fallbackBacktestId(Strategy $strategy): string
+    {
+        $slug = Str::slug($strategy->name);
+
+        return $slug !== '' ? $slug : 'strategy-'.$strategy->id;
     }
 
     /**
@@ -196,7 +176,7 @@ class ImportMt5CsvAction
     {
         $backtestId = trim((string) ($data['backtest_id'] ?? ''));
 
-        return $backtestId !== '' ? $backtestId : 'strategy-'.$strategy->id;
+        return $backtestId !== '' ? $backtestId : self::fallbackBacktestId($strategy);
     }
 
     private static function isXlsx(string $path): bool

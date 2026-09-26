@@ -57,6 +57,7 @@ class StrategyMetricsService
             'gross_profit' => round($grossProfit, 2),
             'gross_loss' => round($grossLoss, 2),
             'profit_factor' => $grossLoss > 0 ? round($grossProfit / $grossLoss, 2) : null,
+            'profit_drawdown_ratio' => $drawdown['max_drawdown'] > 0 ? round($netProfit / $drawdown['max_drawdown'], 2) : null,
             'average_payoff' => $averagePayoff !== null ? round($averagePayoff, 2) : null,
             'payoff' => $averagePayoff !== null ? round($averagePayoff, 2) : null,
             'average_trade' => $totalTrades > 0 ? round($netProfit / $totalTrades, 2) : 0.0,
