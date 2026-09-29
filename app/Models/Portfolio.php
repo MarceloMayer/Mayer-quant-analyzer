@@ -34,4 +34,9 @@ class Portfolio extends Model
     {
         return $this->hasMany(PortfolioStrategy::class);
     }
+
+    public function weightOptimizations(): HasMany
+    {
+        return $this->hasMany(PortfolioWeightOptimization::class);
+    }
 }

@@ -4,11 +4,12 @@ namespace App\Filament\Resources\Portfolios\Pages;
 
 use App\Filament\Resources\Portfolios\PortfolioResource;
 use App\Models\Portfolio;
-use App\Models\PortfolioStrategy;
+use App\Models\PortfolioWeightOptimization;
 use App\Services\Metrics\MonthlyPerformanceService;
 use App\Services\Metrics\PortfolioAnalyzerService;
 use App\Services\Metrics\PortfolioCorrelationService;
 use App\Services\Portfolio\PortfolioWeightOptimizerService;
+use App\Services\Reports\PortfolioReportService;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
@@ -19,10 +20,12 @@ use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PortfolioResultsPage extends ViewRecord
 {
+    private const MAX_KEPT_OPTIMIZATIONS = 30;
+
     protected static string $resource = PortfolioResource::class;
 
     protected static ?string $title = 'Resultados do Portfólio';
@@ -56,6 +59,7 @@ class PortfolioResultsPage extends ViewRecord
                             'metrics' => $metrics,
                             'correlation' => $this->correlation(),
                             'weightSuggestion' => $this->weightSuggestion,
+                            'weightsKey' => $this->weightsSignature(),
                             'selectedMonthlyYear' => $this->selectedMonthlyYear,
                             'monthlyYearOptions' => $this->monthlyYearOptions($monthlyPerformance),
                             'filteredMonthlyPerformance' => $this->filterByYear($monthlyPerformance),
@@ -64,6 +68,20 @@ class PortfolioResultsPage extends ViewRecord
                         ];
                     }),
             ]);
+    }
+
+    /**
+     * Child widgets get their data as mount-time props and Livewire keeps an existing child (and
+     * its stale props) across parent re-renders. Folding the current weights into their keys makes
+     * them remount with fresh numbers as soon as the weights or the active set change.
+     */
+    private function weightsSignature(): string
+    {
+        return md5($this->portfolio()->portfolioStrategies()
+            ->orderBy('id')
+            ->get(['strategy_id', 'weight', 'enabled'])
+            ->map(fn ($row): string => $row->strategy_id.':'.(float) $row->weight.':'.(int) $row->enabled)
+            ->implode('|'));
     }
 
     /**
@@ -200,12 +218,41 @@ class PortfolioResultsPage extends ViewRecord
                         ->minValue(1)
                         ->maxValue(20)
                         ->default(6),
+                    TextInput::make('max_correlation')
+                        ->label('Correlação média máxima (opcional)')
+                        ->helperText('Limita a correlação média entre as estratégias, ponderada pelos pesos (0 a 1, usando o período da matriz de correlação). Deixe vazio para ignorar.')
+                        ->numeric()
+                        ->minValue(0)
+                        ->maxValue(1)
+                        ->step(0.05),
                 ])
                 ->action(function (array $data): void {
                     $this->runWeightOptimization($data);
                 }),
+            Action::make('exportPdf')
+                ->label('Exportar PDF')
+                ->icon(Heroicon::OutlinedDocumentArrowDown)
+                ->color('gray')
+                ->action(fn () => $this->downloadPdfReport()),
+            Action::make('optimizationHistory')
+                ->label('Histórico de otimizações')
+                ->icon(Heroicon::OutlinedClock)
+                ->color('gray')
+                ->url(fn (): string => PortfolioResource::getUrl('optimizations', ['record' => $this->portfolio()])),
             EditAction::make(),
         ];
+    }
+
+    private function downloadPdfReport(): StreamedResponse
+    {
+        $report = app(PortfolioReportService::class);
+        $pdf = $report->pdf($this->portfolio());
+
+        return response()->streamDownload(
+            fn () => print ($pdf->output()),
+            $report->fileName($this->portfolio()),
+            ['Content-Type' => 'application/pdf'],
+        );
     }
 
     /**
@@ -220,6 +267,10 @@ class PortfolioResultsPage extends ViewRecord
                 'min' => (int) ($data['min_weight'] ?? 1),
                 'max' => (int) ($data['max_weight'] ?? 6),
             ],
+            [
+                'max_weighted_correlation' => $data['max_correlation'] ?? null,
+                'correlation_period' => $this->correlationPeriod,
+            ],
         );
 
         if (($result['ok'] ?? false) !== true) {
@@ -233,7 +284,21 @@ class PortfolioResultsPage extends ViewRecord
             return;
         }
 
-        $this->weightSuggestion = $result;
+        $optimization = $this->portfolio()->weightOptimizations()->create([
+            'objective' => $result['objective'],
+            'min_weight' => $result['bounds']['min'],
+            'max_weight' => $result['bounds']['max'],
+            'max_correlation' => $result['constraint']['max_weighted_correlation'],
+            'changed' => $result['changed'],
+            'result' => $result,
+        ]);
+
+        $this->pruneWeightOptimizations();
+
+        $this->weightSuggestion = $result + [
+            'optimization_id' => $optimization->getKey(),
+            'is_favorite' => false,
+        ];
 
         Notification::make()
             ->title($result['changed']
@@ -241,6 +306,30 @@ class PortfolioResultsPage extends ViewRecord
                 : 'Os pesos atuais já são os melhores para esse objetivo.')
             ->success()
             ->send();
+    }
+
+    /**
+     * Keeps the most recent runs; favorites and applied runs are never discarded.
+     */
+    private function pruneWeightOptimizations(): void
+    {
+        $keepIds = $this->portfolio()->weightOptimizations()
+            ->latest('id')
+            ->limit(self::MAX_KEPT_OPTIMIZATIONS)
+            ->pluck('id');
+
+        $this->portfolio()->weightOptimizations()
+            ->where('is_favorite', false)
+            ->whereNull('applied_at')
+            ->whereNotIn('id', $keepIds)
+            ->delete();
+    }
+
+    private function currentOptimization(): ?PortfolioWeightOptimization
+    {
+        $id = (int) ($this->weightSuggestion['optimization_id'] ?? 0);
+
+        return $id > 0 ? $this->portfolio()->weightOptimizations()->find($id) : null;
     }
 
     public function applyWeights(): void
@@ -251,17 +340,9 @@ class PortfolioResultsPage extends ViewRecord
             return;
         }
 
-        DB::transaction(function () use ($strategies): void {
-            foreach ($strategies as $strategy) {
-                PortfolioStrategy::query()
-                    ->where('portfolio_id', $this->portfolio()->getKey())
-                    ->where('strategy_id', (int) $strategy['strategy_id'])
-                    ->each(function (PortfolioStrategy $portfolioStrategy) use ($strategy): void {
-                        $portfolioStrategy->weight = (float) $strategy['suggested_weight'];
-                        $portfolioStrategy->save();
-                    });
-            }
-        });
+        app(PortfolioWeightOptimizerService::class)->applyWeights($this->portfolio(), $strategies);
+
+        $this->currentOptimization()?->update(['applied_at' => now()]);
 
         $this->weightSuggestion = [];
 
@@ -269,6 +350,19 @@ class PortfolioResultsPage extends ViewRecord
             ->title('Pesos atualizados. As métricas foram recalculadas.')
             ->success()
             ->send();
+    }
+
+    public function toggleFavoriteSuggestion(): void
+    {
+        $optimization = $this->currentOptimization();
+
+        if ($optimization === null) {
+            return;
+        }
+
+        $optimization->update(['is_favorite' => ! $optimization->is_favorite]);
+
+        $this->weightSuggestion['is_favorite'] = $optimization->is_favorite;
     }
 
     public function discardWeightSuggestion(): void

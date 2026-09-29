@@ -52,6 +52,16 @@
 }
 .dark .pca-card-title { color: rgb(249 250 251); }
 .pca-card-body { padding: 1.25rem; }
+.pca-card-header-toggle { cursor: pointer; user-select: none; }
+.pca-card-header-toggle:focus-visible { outline: 2px solid rgb(59 130 246); outline-offset: -2px; }
+.pca-card-chevron {
+    color: rgb(107 114 128);
+    font-size: 1rem;
+    line-height: 1;
+    transition: transform .15s ease;
+    transform: rotate(-90deg);
+}
+.pca-card-chevron.is-open { transform: rotate(0deg); }
 
 .pca-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .pca-grid-2 > *, .pca-analysis-params > * { min-width: 0; }
@@ -225,10 +235,10 @@
 .pca-score-high { color: rgb(22 163 74); font-weight: 700; }
 .pca-score-mid  { color: rgb(202 138 4); font-weight: 600; }
 .pca-score-low  { color: rgb(220 38 38); font-weight: 600; }
-.pca-tag-list { display: flex; flex-wrap: wrap; gap: 0.2rem; max-width: 128px; white-space: normal; }
+.pca-tag-list { display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; white-space: normal; }
 .pca-tag {
-    font-size: 0.575rem;
-    padding: 0.1rem 0.25rem;
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
     background: rgb(239 246 255);
     color: rgb(29 78 216);
     border-radius: 9999px;
@@ -458,11 +468,21 @@
     @endif
 
     {{-- ====================== CONFIGURATION ====================== --}}
-    <div class="pca-card">
-        <div class="pca-card-header">
+    <div class="pca-card" x-data="{ configOpen: false }">
+        <div
+            class="pca-card-header pca-card-header-toggle"
+            :style="configOpen ? '' : 'border-bottom-color: transparent'"
+            role="button"
+            tabindex="0"
+            :aria-expanded="configOpen.toString()"
+            @click="configOpen = ! configOpen"
+            @keydown.enter.prevent="configOpen = ! configOpen"
+            @keydown.space.prevent="configOpen = ! configOpen"
+        >
             <span class="pca-card-title">Configurações da Análise</span>
+            <span class="pca-card-chevron" :class="{ 'is-open': configOpen }" aria-hidden="true">&#9662;</span>
         </div>
-        <div class="pca-card-body">
+        <div class="pca-card-body" x-show="configOpen" x-collapse x-cloak>
             <div class="pca-grid-2">
                 {{-- Filters column --}}
                 <div class="pca-filter-stack">
@@ -701,7 +721,7 @@
                                         @change="$event.target.checked ? $wire.selectAllResults() : $wire.deselectAllResults()"
                                     >
                                 </th>
-                                <th style="width:16rem;">Estratégias</th>
+                                <th style="width:19rem;">Estratégias</th>
                                 @foreach ($columns as $col => $label)
                                     <th
                                         class="sortable {{ $sortColumn === $col ? 'sort-active' : '' }}"
@@ -727,10 +747,6 @@
                                     $scoreClass = $score >= 70 ? 'pca-score-high' : ($score >= 40 ? 'pca-score-mid' : 'pca-score-low');
                                     $profitClass = $profit >= 0 ? 'pca-profit-pos' : 'pca-profit-neg';
 
-                                    $displayNames = count($names) <= 3
-                                        ? $names
-                                        : array_slice($names, 0, 2);
-                                    $extraCount = count($names) > 3 ? count($names) - 2 : 0;
                                 @endphp
                                 <tr
                                     wire:click="previewCombination('{{ $hash }}')"
@@ -747,12 +763,9 @@
                                     </td>
                                     <td>
                                         <div class="pca-tag-list">
-                                            @foreach ($displayNames as $n)
+                                            @foreach ($names as $n)
                                                 <span class="pca-tag">{{ $n }}</span>
                                             @endforeach
-                                            @if ($extraCount > 0)
-                                                <span class="pca-tag" style="background:rgb(243 244 246);color:rgb(107 114 128);">+{{ $extraCount }}</span>
-                                            @endif
                                         </div>
                                     </td>
 

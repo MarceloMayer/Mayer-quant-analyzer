@@ -844,39 +844,9 @@
 <div class="space-y-6">
     @livewire(\App\Filament\Widgets\PortfolioMetricsOverview::class, [
         'metrics' => $metrics,
-    ])
+    ], key('metrics-overview-'.$weightsKey))
 
     @if (($weightSuggestion['ok'] ?? false) === true)
-        @php
-            $wsMetricRows = [
-                ['key' => 'ulcer_index', 'label' => 'Ulcer Index', 'fmt' => 'ratio', 'lower_better' => true],
-                ['key' => 'positive_months_percent', 'label' => 'Meses positivos', 'fmt' => 'percent', 'lower_better' => false],
-                ['key' => 'max_drawdown', 'label' => 'Drawdown máximo', 'fmt' => 'money_neg', 'lower_better' => true],
-                ['key' => 'max_drawdown_percent', 'label' => 'Drawdown máximo %', 'fmt' => 'percent', 'lower_better' => true],
-                ['key' => 'net_profit', 'label' => 'Resultado líquido', 'fmt' => 'money', 'lower_better' => false],
-                ['key' => 'net_profit_to_drawdown', 'label' => 'Fator de Recuperação', 'fmt' => 'ratio', 'lower_better' => false],
-                ['key' => 'profit_factor', 'label' => 'Fator de lucro', 'fmt' => 'ratio', 'lower_better' => false],
-                ['key' => 'equity_r2', 'label' => 'R² da curva', 'fmt' => 'ratio4', 'lower_better' => false],
-                ['key' => 'positive_days', 'label' => 'Dias positivos', 'fmt' => 'integer', 'lower_better' => false],
-                ['key' => 'negative_days', 'label' => 'Dias negativos', 'fmt' => 'integer', 'lower_better' => true],
-            ];
-            $wsFmt = function (string $fmt, mixed $value) use ($formatMoney, $formatSignedMoney, $formatPercent): string {
-                return match ($fmt) {
-                    'money' => $formatSignedMoney($value),
-                    'money_neg' => (float) $value > 0 ? '-' . $formatMoney($value) : $formatMoney(0),
-                    'percent' => $formatPercent($value),
-                    'ratio4' => number_format((float) $value, 4, ',', '.'),
-                    'integer' => number_format((float) $value, 0, ',', '.'),
-                    default => number_format((float) $value, 2, ',', '.'),
-                };
-            };
-            $wsCurrent = $weightSuggestion['current_metrics'] ?? [];
-            $wsSuggested = $weightSuggestion['suggested_metrics'] ?? [];
-            $wsWeight = fn (mixed $value): string => (float) $value == (int) $value
-                ? number_format((float) $value, 0, ',', '.') . 'x'
-                : number_format((float) $value, 2, ',', '.') . 'x';
-        @endphp
-
         <section class="mqa-strategy-card mqa-wopt">
             <div class="mqa-strategy-header mqa-wopt-header">
                 <div>
@@ -887,6 +857,11 @@
                     </p>
                 </div>
                 <div class="mqa-wopt-actions">
+                    @if (! empty($weightSuggestion['optimization_id']))
+                        <button type="button" class="mqa-wopt-btn mqa-wopt-btn-ghost" wire:click="toggleFavoriteSuggestion" title="Marcar esta sugestão como favorita no histórico de otimizações">
+                            @if ($weightSuggestion['is_favorite'] ?? false) &#9733; Favorita @else &#9734; Favoritar @endif
+                        </button>
+                    @endif
                     <button type="button" class="mqa-wopt-btn mqa-wopt-btn-ghost" wire:click="discardWeightSuggestion">Descartar</button>
                     <button
                         type="button"
@@ -903,101 +878,16 @@
             </div>
 
             <div class="mqa-wopt-body">
-                @if (($weightSuggestion['changed'] ?? false) !== true)
-                    <p class="mqa-wopt-note">Os pesos atuais já são os melhores encontrados para esse objetivo — nada a aplicar.</p>
-                @endif
-
-                <div class="mqa-wopt-grid">
-                    <div class="mqa-wopt-panel">
-                        <table class="mqa-wopt-table">
-                            <thead>
-                                <tr>
-                                    <th class="mqa-left">Estratégia</th>
-                                    <th class="mqa-right">Peso atual</th>
-                                    <th class="mqa-right">Peso sugerido</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($weightSuggestion['strategies'] ?? [] as $ws)
-                                    @php $wsChanged = abs((float) $ws['current_weight'] - (float) $ws['suggested_weight']) >= 0.01; @endphp
-                                    <tr>
-                                        <td class="mqa-left">{{ $ws['name'] }}</td>
-                                        <td class="mqa-right">{{ $wsWeight($ws['current_weight']) }}</td>
-                                        <td class="mqa-right {{ $wsChanged ? 'mqa-wopt-changed' : '' }}">{{ $wsWeight($ws['suggested_weight']) }}</td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="mqa-wopt-panel">
-                        <table class="mqa-wopt-table">
-                            <thead>
-                                <tr>
-                                    <th class="mqa-left">Métrica</th>
-                                    <th class="mqa-right">Atual</th>
-                                    <th class="mqa-right">Sugerido</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($wsMetricRows as $row)
-                                    @php
-                                        $cur = (float) ($wsCurrent[$row['key']] ?? 0);
-                                        $sug = (float) ($wsSuggested[$row['key']] ?? 0);
-                                        $delta = round($sug - $cur, 4);
-                                        $moved = abs($delta) < 1e-9 ? 0 : ($delta > 0 ? 1 : -1);
-                                        $better = $moved === 0 ? null : ($row['lower_better'] ? $delta < 0 : $delta > 0);
-                                    @endphp
-                                    <tr>
-                                        <td class="mqa-left">{{ $row['label'] }}</td>
-                                        <td class="mqa-right">{{ $wsFmt($row['fmt'], $cur) }}</td>
-                                        <td class="mqa-right {{ $better === true ? 'mqa-wopt-up' : ($better === false ? 'mqa-wopt-down' : '') }}">
-                                            {{ $wsFmt($row['fmt'], $sug) }}
-                                            @if ($moved === 1) &uarr; @elseif ($moved === -1) &darr; @endif
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                @include('filament.partials.weight-suggestion-details', [
+                    'suggestion' => $weightSuggestion,
+                    'formatMoney' => $formatMoney,
+                    'formatSignedMoney' => $formatSignedMoney,
+                    'formatPercent' => $formatPercent,
+                ])
             </div>
         </section>
 
-        @once
-            <style>
-                .mqa-wopt-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-                .mqa-wopt-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-                .mqa-wopt-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.9rem; font-size: 0.8125rem; font-weight: 600; border-radius: 0.5rem; border: none; cursor: pointer; transition: background .15s, opacity .15s; }
-                .mqa-wopt-btn:disabled { opacity: .5; cursor: not-allowed; }
-                .mqa-wopt-btn-primary { background: rgb(59 130 246); color: #fff; }
-                .mqa-wopt-btn-primary:hover:not(:disabled) { background: rgb(37 99 235); }
-                .mqa-wopt-btn-ghost { background: transparent; color: rgb(107 114 128); border: 1px solid rgb(229 231 235); }
-                .mqa-wopt-btn-ghost:hover { background: rgb(243 244 246); }
-                .dark .mqa-wopt-btn-ghost { border-color: rgb(55 65 81); color: rgb(156 163 175); }
-                .dark .mqa-wopt-btn-ghost:hover { background: rgb(31 41 55); }
-                .mqa-wopt-body { padding: 1rem; }
-                .mqa-wopt-note { margin: 0 0 0.75rem; font-size: 0.8125rem; color: rgb(133 77 14); background: rgb(254 249 195); border: 1px solid rgb(253 224 71); border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
-                .dark .mqa-wopt-note { color: rgb(253 224 71); background: rgb(113 63 18 / .3); border-color: rgb(113 63 18); }
-                .mqa-wopt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-                @media (max-width: 820px) { .mqa-wopt-grid { grid-template-columns: 1fr; } }
-                .mqa-wopt-panel { border: 1px solid rgb(229 231 235); border-radius: 0.5rem; overflow: hidden; }
-                .dark .mqa-wopt-panel { border-color: rgb(55 65 81); }
-                .mqa-wopt-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
-                .mqa-wopt-table th { background: rgb(249 250 251); color: rgb(107 114 128); font-weight: 600; padding: 0.5rem 0.75rem; }
-                .dark .mqa-wopt-table th { background: rgb(31 41 55); color: rgb(156 163 175); }
-                .mqa-wopt-table td { padding: 0.5rem 0.75rem; border-top: 1px solid rgb(243 244 246); color: rgb(55 65 81); }
-                .dark .mqa-wopt-table td { border-color: rgb(31 41 55); color: rgb(209 213 219); }
-                .mqa-wopt-table .mqa-left { text-align: left; }
-                .mqa-wopt-table .mqa-right { text-align: right; }
-                .mqa-wopt-changed { color: rgb(37 99 235); font-weight: 700; }
-                .dark .mqa-wopt-changed { color: rgb(96 165 250); }
-                .mqa-wopt-up { color: rgb(22 163 74); font-weight: 700; }
-                .mqa-wopt-down { color: rgb(220 38 38); font-weight: 700; }
-                .dark .mqa-wopt-up { color: rgb(74 222 128); }
-                .dark .mqa-wopt-down { color: rgb(248 113 113); }
-            </style>
-        @endonce
+        @include('filament.partials.weight-optimizer-styles')
     @endif
 
     @if (! $hasTrades)
@@ -1018,7 +908,7 @@
                     @livewire(\App\Filament\Widgets\EquityCurveChart::class, [
                         'heading' => 'Resultado financeiro acumulado',
                         'curve' => $metrics['consolidated_equity_curve'] ?? [],
-                    ])
+                    ], key('equity-curve-'.$weightsKey))
                 </div>
 
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-1">
@@ -1067,7 +957,7 @@
                         'heading' => $selectedMonthlyYear.' - Mês a mês',
                         'description' => 'Meses sem operações são omitidos, não tratados como lucro ou prejuízo.',
                         'rows' => $selectedYearBars,
-                    ], key('monthly-bars-'.$selectedMonthlyYear))
+                    ], key('monthly-bars-'.$selectedMonthlyYear.'-'.$weightsKey))
                 @endif
             </div>
 
@@ -1075,13 +965,13 @@
                 'heading' => 'Resultado mês a mês',
                 'description' => 'Resultado financeiro consolidado de cada mês, calculado pelos trades fechados das estratégias ativas.',
                 'performance' => $filteredMonthlyPerformance,
-            ], key('monthly-table-'.$selectedMonthlyYear))
+            ], key('monthly-table-'.$selectedMonthlyYear.'-'.$weightsKey))
 
             @livewire(\App\Filament\Widgets\MonthlyPerformanceTable::class, [
                 'heading' => 'Resultado acumulado por mês',
                 'description' => 'Saldo acumulado ao final de cada mês, reconstruído pela curva consolidada ordenada por data de saída.',
                 'performance' => $filteredMonthlyCumulativePerformance,
-            ], key('monthly-cumulative-table-'.$selectedMonthlyYear))
+            ], key('monthly-cumulative-table-'.$selectedMonthlyYear.'-'.$weightsKey))
         </div>
     @endif
 
@@ -1321,7 +1211,7 @@
     <section class="mqa-strategy-card">
         <div class="mqa-strategy-header">
             <h3 class="mqa-strategy-title">Estratégias do portfólio</h3>
-            <p class="mqa-strategy-description">Resultado e risco individual das estratégias vinculadas.</p>
+            <p class="mqa-strategy-description">Resultado e risco individual das estratégias vinculadas. Nas estratégias ativas, os valores já refletem o peso; nas inativas, aparecem sem peso.</p>
         </div>
 
         <p class="mqa-scroll-hint">Deslize a tabela para ver todos os indicadores.</p>

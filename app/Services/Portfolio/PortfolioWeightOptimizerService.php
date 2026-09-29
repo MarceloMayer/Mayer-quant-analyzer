@@ -5,7 +5,10 @@ namespace App\Services\Portfolio;
 use App\Models\Portfolio;
 use App\Models\PortfolioStrategy;
 use App\Models\Trade;
-use App\Services\Metrics\DrawdownCalculator;
+use App\Services\Charts\DatedLineChartBuilder;
+use App\Services\Metrics\PortfolioAnalyzerService;
+use App\Services\Metrics\PortfolioCorrelationService;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Searches for per-strategy weights that improve a chosen objective for a portfolio,
@@ -35,8 +38,9 @@ use App\Services\Metrics\DrawdownCalculator;
  * The search runs a full grid for small portfolios and random-restart hill climbing
  * for larger ones, capped by a fixed evaluation budget. Reconstructing the weighted
  * equity curve is done in a single pass per evaluation (no array allocation) for speed;
- * the before/after metrics shown to the user are then recomputed once with the real
- * calculators so they line up with the rest of the app.
+ * the before/after metrics shown to the user are then produced by PortfolioAnalyzerService
+ * (with the suggested weights as an override), so they are exactly what the results page
+ * shows once the weights are applied.
  */
 class PortfolioWeightOptimizerService
 {
@@ -62,10 +66,19 @@ class PortfolioWeightOptimizerService
 
     private const FULL_GRID_MAX_POINTS = 4096;
 
+    // Large enough to dominate any objective's scale, so a correlation cap violation always
+    // loses to a feasible candidate but still gives the search a slope towards feasibility.
+    private const CORRELATION_PENALTY = 1_000_000.0;
+
+    private const CHART_CURRENT_COLOR = '#94a3b8';
+
+    private const CHART_SUGGESTED_COLOR = '#2563eb';
+
     public function __construct(
-        private readonly DrawdownCalculator $drawdownCalculator,
-        private readonly UlcerIndexCalculator $ulcerIndexCalculator,
-        private readonly LinearRegressionService $linearRegressionService,
+        private readonly PortfolioAnalyzerService $analyzer,
+        private readonly PortfolioCorrelationService $correlationService,
+        private readonly PortfolioMetricsCache $metricsCache,
+        private readonly DatedLineChartBuilder $chartBuilder,
     ) {}
 
     /**
@@ -83,9 +96,10 @@ class PortfolioWeightOptimizerService
 
     /**
      * @param  array{min?: int|float, max?: int|float}  $bounds
+     * @param  array{max_weighted_correlation?: int|float|string|null, correlation_period?: string}  $constraints
      * @return array<string, mixed>
      */
-    public function optimize(Portfolio $portfolio, string $objective, array $bounds = []): array
+    public function optimize(Portfolio $portfolio, string $objective, array $bounds = [], array $constraints = []): array
     {
         $objective = array_key_exists($objective, self::objectiveOptions()) ? $objective : self::OBJECTIVE_ULCER;
         $min = max(1, (int) round((float) ($bounds['min'] ?? self::GRID_MIN)));
@@ -128,19 +142,40 @@ class PortfolioWeightOptimizerService
             ->all();
         $searchStart = array_map(fn (float $weight): float => $this->snapToGrid($weight, $grid), $currentWeights);
 
+        // Pearson correlation doesn't depend on the weights, so the matrix is built once
+        // here instead of inside the evaluation loop.
+        $correlations = $this->correlationLookup(
+            $portfolio,
+            (string) ($constraints['correlation_period'] ?? PortfolioCorrelationService::PERIOD_DAILY),
+        );
+        $maxCorrelation = $this->normalizeMaxCorrelation($constraints['max_weighted_correlation'] ?? null);
+        $constraintApplied = $maxCorrelation !== null && $correlations !== [];
+
         $evaluations = 0;
-        $evaluate = function (array $weights) use ($trades, $baseline, $objective, &$evaluations): float {
+        $evaluate = function (array $weights) use ($trades, $baseline, $objective, $correlations, $maxCorrelation, $constraintApplied, &$evaluations): float {
             $evaluations++;
 
-            return $this->objectiveValue($this->fastMetrics($trades, $weights, $baseline), $objective);
+            $score = $this->objectiveValue($this->fastMetrics($trades, $weights, $baseline), $objective);
+
+            if ($constraintApplied) {
+                $excess = $this->weightedCorrelation($weights, $correlations) - $maxCorrelation;
+                $score -= self::CORRELATION_PENALTY * max(0.0, $excess);
+            }
+
+            return $score;
         };
 
         $best = $this->search($strategyIds, $grid, $searchStart, $evaluate, $evaluations);
 
         $suggestedWeights = $this->normalize($best);
 
-        $currentMetrics = $this->fullMetrics($trades, $currentWeights, $baseline);
-        $suggestedMetrics = $this->fullMetrics($trades, $suggestedWeights, $baseline);
+        $currentMetrics = $this->displayMetrics($this->analyzer->calculate($portfolio));
+        $suggestedMetrics = $this->displayMetrics($this->analyzer->calculate($portfolio, $suggestedWeights));
+
+        if ($correlations !== []) {
+            $currentMetrics['weighted_correlation'] = round($this->weightedCorrelation($currentWeights, $correlations), 4);
+            $suggestedMetrics['weighted_correlation'] = round($this->weightedCorrelation($suggestedWeights, $correlations), 4);
+        }
 
         $strategies = $enabled->map(fn (PortfolioStrategy $row): array => [
             'strategy_id' => (int) $row->strategy_id,
@@ -153,13 +188,129 @@ class PortfolioWeightOptimizerService
             'ok' => true,
             'objective' => $objective,
             'objective_label' => self::objectiveOptions()[$objective],
+            'bounds' => ['min' => $min, 'max' => $max],
             'evaluations' => $evaluations,
             'strategies' => $strategies,
             'current_metrics' => $currentMetrics,
             'suggested_metrics' => $suggestedMetrics,
             'improvement' => $this->improvement($objective, $currentMetrics, $suggestedMetrics),
             'changed' => $this->weightsChanged($strategies),
+            'has_correlation' => $correlations !== [],
+            'chart' => $this->chartBuilder->build([
+                ['label' => 'Pesos atuais', 'color' => self::CHART_CURRENT_COLOR, 'points' => $this->equityPoints($trades, $currentWeights, $baseline)],
+                ['label' => 'Pesos sugeridos', 'color' => self::CHART_SUGGESTED_COLOR, 'points' => $this->equityPoints($trades, $suggestedWeights, $baseline)],
+            ]),
+            'constraint' => [
+                'max_weighted_correlation' => $maxCorrelation,
+                'applied' => $constraintApplied,
+                'satisfied' => ! $constraintApplied
+                    || ($suggestedMetrics['weighted_correlation'] ?? 0.0) <= $maxCorrelation + 1e-9,
+            ],
         ];
+    }
+
+    /**
+     * Writes suggested weights onto the portfolio's strategies. Goes through the model (not a bulk
+     * update) so the PortfolioStrategy hooks keep enforcing ownership and busting the metrics cache.
+     * Strategies that are no longer part of the portfolio are skipped.
+     *
+     * @param  array<int, array{strategy_id: int|string, suggested_weight: int|float|string}>  $strategies
+     * @return int Number of portfolio strategies updated.
+     */
+    public function applyWeights(Portfolio $portfolio, array $strategies): int
+    {
+        $updated = 0;
+
+        DB::transaction(function () use ($portfolio, $strategies, &$updated): void {
+            foreach ($strategies as $strategy) {
+                PortfolioStrategy::query()
+                    ->where('portfolio_id', $portfolio->getKey())
+                    ->where('strategy_id', (int) $strategy['strategy_id'])
+                    ->each(function (PortfolioStrategy $portfolioStrategy) use ($strategy, &$updated): void {
+                        $portfolioStrategy->weight = (float) $strategy['suggested_weight'];
+                        $portfolioStrategy->save();
+                        $updated++;
+                    });
+            }
+        });
+
+        // The per-row model hook already forgets the cache, but inside the transaction: a concurrent
+        // request could re-cache the old weights before commit. Forget again once they are durable.
+        $this->metricsCache->forgetPortfolio((int) $portfolio->getKey());
+
+        return $updated;
+    }
+
+    /**
+     * Builds [rowStrategyId][columnStrategyId] => correlation from the service's positional
+     * matrix. Empty when the portfolio doesn't have enough strategies to correlate.
+     *
+     * @return array<int, array<int, float>>
+     */
+    private function correlationLookup(Portfolio $portfolio, string $period): array
+    {
+        $data = $this->correlationService->calculate(
+            $portfolio,
+            $period,
+            PortfolioCorrelationService::METRIC_PROFIT_LOSS,
+        );
+
+        if (($data['has_enough_strategies'] ?? false) !== true) {
+            return [];
+        }
+
+        $columnIds = array_map(fn (array $strategy): int => (int) $strategy['id'], $data['strategies'] ?? []);
+        $lookup = [];
+
+        foreach ($data['matrix'] ?? [] as $row) {
+            $rowId = (int) ($row['strategy']['id'] ?? 0);
+
+            foreach ($row['cells'] ?? [] as $index => $cell) {
+                $columnId = $columnIds[$index] ?? null;
+
+                if ($columnId === null || $columnId === $rowId) {
+                    continue;
+                }
+
+                $lookup[$rowId][$columnId] = (float) ($cell['value'] ?? 0.0);
+            }
+        }
+
+        return $lookup;
+    }
+
+    private function normalizeMaxCorrelation(mixed $value): ?float
+    {
+        if ($value === null || $value === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        return max(0.0, min(1.0, (float) $value));
+    }
+
+    /**
+     * Weight-averaged pairwise correlation: sum(wi*wj*rho_ij) / sum(wi*wj) over pairs i<j.
+     * Signed on purpose — negatively correlated pairs pull the figure down (good diversification).
+     *
+     * @param  array<int, float>  $weights
+     * @param  array<int, array<int, float>>  $correlations
+     */
+    private function weightedCorrelation(array $weights, array $correlations): float
+    {
+        $ids = array_keys($weights);
+        $count = count($ids);
+        $numerator = 0.0;
+        $denominator = 0.0;
+
+        for ($i = 0; $i < $count; $i++) {
+            for ($j = $i + 1; $j < $count; $j++) {
+                $pairWeight = $weights[$ids[$i]] * $weights[$ids[$j]];
+                $numerator += $pairWeight * ($correlations[$ids[$i]][$ids[$j]] ?? 0.0);
+                $denominator += $pairWeight;
+            }
+        }
+
+        return $denominator > 0 ? $numerator / $denominator : 0.0;
     }
 
     /**
@@ -181,6 +332,36 @@ class PortfolioWeightOptimizerService
                 'day_key' => $trade->exit_time?->format('Y-m-d') ?? '',
             ])
             ->all();
+    }
+
+    /**
+     * End-of-day equity (baseline + cumulative weighted P&L) for the comparison chart. One point
+     * per day keeps the payload small: the suggestion lives in a public Livewire property.
+     *
+     * @param  array<int, array{strategy_id: int, net_profit: float, month_key: string, day_key: string}>  $trades
+     * @param  array<int, float>  $weights
+     * @return array<int, array{date: string, equity: float}>
+     */
+    private function equityPoints(array $trades, array $weights, float $baseline): array
+    {
+        $cum = 0.0;
+        $byDay = [];
+
+        foreach ($trades as $trade) {
+            $cum += $trade['net_profit'] * ($weights[$trade['strategy_id']] ?? 0.0);
+
+            if ($trade['day_key'] !== '') {
+                $byDay[$trade['day_key']] = round($baseline + $cum, 2);
+            }
+        }
+
+        $points = [];
+
+        foreach ($byDay as $day => $equity) {
+            $points[] = ['date' => (string) $day, 'equity' => $equity];
+        }
+
+        return $points;
     }
 
     /**
@@ -231,70 +412,28 @@ class PortfolioWeightOptimizerService
     }
 
     /**
-     * Recomputes the metrics shown to the user with the same calculators the rest of the app uses.
+     * Maps the portfolio analyzer's output (the same numbers the results page shows) onto the keys the
+     * suggestion panel renders, so "Sugerido" is exactly what the page shows after the weights are applied.
+     * profit_factor stays null when there are no losing trades, as on the page.
      *
-     * @param  array<int, array{strategy_id: int, net_profit: float, month_key: string, day_key: string}>  $trades
-     * @param  array<int, float>  $weights
-     * @return array<string, float>
+     * @param  array<string, mixed>  $analysis
+     * @return array<string, float|null>
      */
-    private function fullMetrics(array $trades, array $weights, float $baseline): array
+    private function displayMetrics(array $analysis): array
     {
-        $cum = 0.0;
-        $curve = [];
-        $months = [];
-        $days = [];
-        $grossProfit = 0.0;
-        $grossLoss = 0.0;
-
-        foreach ($trades as $trade) {
-            $weighted = $trade['net_profit'] * ($weights[$trade['strategy_id']] ?? 0.0);
-            $cum += $weighted;
-            $curve[] = ['equity' => round($cum, 2)];
-
-            if ($trade['month_key'] !== '') {
-                $months[$trade['month_key']] = ($months[$trade['month_key']] ?? 0.0) + $weighted;
-            }
-
-            if ($trade['day_key'] !== '') {
-                $days[$trade['day_key']] = ($days[$trade['day_key']] ?? 0.0) + $weighted;
-            }
-
-            if ($weighted > 0) {
-                $grossProfit += $weighted;
-            } elseif ($weighted < 0) {
-                $grossLoss += abs($weighted);
-            }
-        }
-
-        $drawdown = $this->drawdownCalculator->calculate($curve, $baseline);
-        $ulcer = $this->ulcerIndexCalculator->calculate($curve, $baseline);
-        $equityR2 = $this->linearRegressionService->calculateR2(array_column($curve, 'equity'));
-        $netProfit = round($cum, 2);
-        $absDrawdown = abs((float) $drawdown['max_drawdown']);
-        $monthsWithTrades = count($months);
-        $positiveMonths = count(array_filter($months, fn (float $value): bool => $value > 0));
-        // Same classification as PortfolioDailyPerformanceService: a day counts by the
-        // sign of its summed (weighted) net profit, not by trade count.
-        $positiveDays = count(array_filter($days, fn (float $value): bool => $value > 0));
-        $negativeDays = count(array_filter($days, fn (float $value): bool => $value < 0));
+        $daily = $analysis['daily_performance'] ?? [];
 
         return [
-            'net_profit' => $netProfit,
-            'max_drawdown' => (float) $drawdown['max_drawdown'],
-            'max_drawdown_percent' => (float) $drawdown['max_drawdown_percent'],
-            'ulcer_index' => $ulcer,
-            'equity_r2' => $equityR2,
-            'net_profit_to_drawdown' => $absDrawdown > 0
-                ? round($netProfit / $absDrawdown, 2)
-                : ($netProfit > 0 ? 100.0 : 0.0),
-            'positive_months_percent' => $monthsWithTrades > 0
-                ? round(($positiveMonths / $monthsWithTrades) * 100, 2)
-                : 0.0,
-            'profit_factor' => $grossLoss > 0
-                ? round($grossProfit / $grossLoss, 2)
-                : ($grossProfit > 0 ? 100.0 : 0.0),
-            'positive_days' => (float) $positiveDays,
-            'negative_days' => (float) $negativeDays,
+            'net_profit' => (float) $analysis['net_profit'],
+            'max_drawdown' => (float) $analysis['max_drawdown'],
+            'max_drawdown_percent' => (float) $analysis['max_drawdown_percent'],
+            'ulcer_index' => (float) $analysis['ulcer_index'],
+            'equity_r2' => (float) $analysis['equity_r2'],
+            'net_profit_to_drawdown' => (float) $analysis['net_profit_to_drawdown'],
+            'positive_months_percent' => (float) $analysis['positive_months_percent'],
+            'profit_factor' => $analysis['profit_factor'] === null ? null : (float) $analysis['profit_factor'],
+            'positive_days' => (float) ($daily['positive_days'] ?? 0),
+            'negative_days' => (float) ($daily['negative_days'] ?? 0),
         ];
     }
 

@@ -33,12 +33,16 @@ class PortfolioAnalyzerService
     }
 
     /**
+     * @param  array<int, int|float>|null  $weightOverrides  strategy_id => weight, used instead of the stored
+     *                                                       weight for those strategies (what-if analysis, e.g.
+     *                                                       previewing an optimizer suggestion without saving it).
      * @return array<string, mixed>
      */
-    public function calculate(Portfolio $portfolio): array
+    public function calculate(Portfolio $portfolio, ?array $weightOverrides = null): array
     {
-        $strategyWeights = $this->enabledStrategyWeights($portfolio);
+        $strategyWeights = $this->enabledStrategyWeights($portfolio, $weightOverrides);
         $activeStrategiesCount = $strategyWeights->keys()->unique()->count();
+        $initialBalance = (float) ($portfolio->initial_balance ?? 0);
 
         $trades = $this->weightedClosedTrades(
             $this->trades($strategyWeights->keys()),
@@ -46,7 +50,7 @@ class PortfolioAnalyzerService
         );
 
         $equityCurve = $this->equityCurveService->calculate($trades);
-        $drawdown = $this->drawdownCalculator->calculate($equityCurve);
+        $drawdown = $this->drawdownCalculator->calculate($equityCurve, $initialBalance);
         $streaks = $this->streakCalculator->calculate($trades);
         $monthlyPerformance = $this->monthlyPerformanceService->calculate($trades);
         $monthlyCumulativePerformance = $this->monthlyPerformanceService->calculateCumulative($trades);
@@ -64,7 +68,6 @@ class PortfolioAnalyzerService
         $averageLoss = $losingTrades->isNotEmpty() ? (float) $losingTrades->avg() : 0.0;
         $payoff = $averageWin > 0 && $averageLoss < 0 ? $averageWin / abs($averageLoss) : null;
 
-        $initialBalance = (float) ($portfolio->initial_balance ?? 0);
         $ulcerIndex = $this->ulcerIndexCalculator->calculate($equityCurve, $initialBalance);
         $equityR2 = $this->linearRegressionService->calculateR2(
             array_map(fn (array $point): float => (float) ($point['equity'] ?? 0), $equityCurve),
@@ -113,7 +116,7 @@ class PortfolioAnalyzerService
             'drawdown_valley' => $drawdown['valley'],
             'consolidated_equity_curve' => $equityCurve,
             'equity_curve' => $equityCurve,
-            'drawdown_curve' => $this->drawdownCurve($equityCurve),
+            'drawdown_curve' => $this->drawdownCurve($equityCurve, $initialBalance),
             'consolidated_monthly_performance' => $monthlyPerformance,
             'monthly_performance' => $monthlyPerformance,
             'consolidated_monthly_cumulative_performance' => $monthlyCumulativePerformance,
@@ -131,7 +134,7 @@ class PortfolioAnalyzerService
             'positive_months' => $positiveMonths,
             'negative_months' => $negativeMonths,
             'positive_months_percent' => $positiveMonthsPercent,
-            'strategy_summaries' => $this->strategySummaries($portfolio),
+            'strategy_summaries' => $this->strategySummaries($portfolio, $strategyWeights, $initialBalance),
             'consolidated_trades' => $this->summarizedTrades($trades),
         ];
     }
@@ -161,16 +164,23 @@ class PortfolioAnalyzerService
     }
 
     /**
+     * @param  array<int, int|float>|null  $weightOverrides
      * @return Collection<int, float>
      */
-    private function enabledStrategyWeights(Portfolio $portfolio): Collection
+    private function enabledStrategyWeights(Portfolio $portfolio, ?array $weightOverrides = null): Collection
     {
-        return $portfolio->portfolioStrategies()
+        $weights = $portfolio->portfolioStrategies()
             ->where('enabled', true)
             ->get(['strategy_id', 'weight'])
             ->mapWithKeys(fn (PortfolioStrategy $portfolioStrategy): array => [
                 $portfolioStrategy->strategy_id => (float) ($portfolioStrategy->weight ?? 1),
             ]);
+
+        if ($weightOverrides === null) {
+            return $weights;
+        }
+
+        return $weights->map(fn (float $weight, int $strategyId): float => (float) ($weightOverrides[$strategyId] ?? $weight));
     }
 
     /**
@@ -276,9 +286,14 @@ class PortfolioAnalyzerService
     }
 
     /**
+     * Per-strategy result and risk as they contribute to the portfolio: active strategies are
+     * scaled by their weight (same factor used by the consolidated numbers); inactive ones don't
+     * take part in the portfolio, so their stand-alone figures are shown unweighted.
+     *
+     * @param  Collection<int, float>  $strategyWeights  enabled strategy_id => effective weight
      * @return array<int, array<string, mixed>>
      */
-    private function strategySummaries(Portfolio $portfolio): array
+    private function strategySummaries(Portfolio $portfolio, Collection $strategyWeights, float $initialBalance): array
     {
         $portfolioStrategies = $portfolio->portfolioStrategies()
             ->with('strategy')
@@ -303,21 +318,31 @@ class PortfolioAnalyzerService
                 ->groupBy('strategy_id');
 
         return $portfolioStrategies
-            ->map(function (PortfolioStrategy $portfolioStrategy) use ($tradesByStrategy): array {
+            ->map(function (PortfolioStrategy $portfolioStrategy) use ($tradesByStrategy, $strategyWeights, $initialBalance): array {
                 $strategy = $portfolioStrategy->strategy;
                 $trades = $strategy === null
                     ? collect()
                     : $tradesByStrategy->get($strategy->id, collect());
-                $equityCurve = $this->equityCurveService->calculate($trades);
-                $drawdown = $this->drawdownCalculator->calculate($equityCurve);
-                $netProfit = (float) $trades->sum(fn (Trade $trade): float => (float) $trade->net_profit);
+                $isActive = (bool) $portfolioStrategy->enabled && $strategy !== null;
+                $storedWeight = (float) ($portfolioStrategy->weight ?? 1);
+                $weight = $isActive ? (float) $strategyWeights->get($strategy->id, $storedWeight) : $storedWeight;
+                $factor = $isActive ? $weight : 1.0;
+
+                $weightedTrades = $trades->map(fn (Trade $trade): object => (object) [
+                    'id' => $trade->id,
+                    'exit_time' => $trade->exit_time,
+                    'net_profit' => (float) $trade->net_profit * $factor,
+                ]);
+                $equityCurve = $this->equityCurveService->calculate($weightedTrades);
+                $drawdown = $this->drawdownCalculator->calculate($equityCurve, $initialBalance);
+                $netProfit = (float) $weightedTrades->sum('net_profit');
 
                 return [
                     'strategy_id' => $strategy?->id,
                     'name' => $strategy?->name ?? '-',
                     'asset' => $strategy?->asset,
                     'enabled' => (bool) $portfolioStrategy->enabled,
-                    'weight' => (float) ($portfolioStrategy->weight ?? 1),
+                    'weight' => $weight,
                     'total_trades' => $trades->count(),
                     'net_profit' => round($netProfit, 2),
                     'max_drawdown' => $drawdown['max_drawdown'],
@@ -332,13 +357,13 @@ class PortfolioAnalyzerService
      * @param  array<int, array<string, mixed>>  $equityCurve
      * @return array<int, array{date: string|null, label: string, value: float, percent: float}>
      */
-    private function drawdownCurve(array $equityCurve): array
+    private function drawdownCurve(array $equityCurve, float $initialBalance = 0.0): array
     {
-        $peak = 0.0;
+        $peak = $initialBalance;
 
         return collect($equityCurve)
-            ->map(function (array $point) use (&$peak): array {
-                $equity = (float) ($point['equity'] ?? 0);
+            ->map(function (array $point) use (&$peak, $initialBalance): array {
+                $equity = $initialBalance + (float) ($point['equity'] ?? 0);
                 $peak = max($peak, $equity);
                 $drawdown = $equity - $peak;
                 $drawdownPercent = $peak > 0 ? ($drawdown / $peak) * 100 : 0.0;

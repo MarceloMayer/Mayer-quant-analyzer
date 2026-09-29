@@ -28,6 +28,8 @@ class StrategyMetricsOverview extends StatsOverviewWidget
         $profitFactor = $this->metrics['profit_factor'] ?? null;
         $recoveryFactor = $this->metrics['profit_drawdown_ratio'] ?? null;
         $payoff = $this->metrics['average_payoff'] ?? null;
+        $bestTrade = (float) ($this->metrics['best_trade'] ?? 0);
+        $worstTrade = (float) ($this->metrics['worst_trade'] ?? 0);
         $totalTrades = (int) ($this->metrics['total_trades'] ?? 0);
         $maxLosingStreak = (int) ($this->metrics['max_losing_streak'] ?? 0);
         $daysWithoutNewHigh = (int) ($this->metrics['max_days_without_new_high'] ?? 0);
@@ -58,6 +60,16 @@ class StrategyMetricsOverview extends StatsOverviewWidget
             Stat::make('Relação ganho/perda', $payoff === null ? '-' : $this->formatNumber($payoff))
                 ->color($this->ratioColor($payoff))
                 ->icon(Heroicon::OutlinedScale),
+
+            Stat::make('Maior ganho', $bestTrade > 0 ? $this->formatSignedMoney($bestTrade) : 'Sem ganhos')
+                ->description('Melhor operação individual')
+                ->color($bestTrade > 0 ? 'success' : 'gray')
+                ->icon(Heroicon::OutlinedArrowUpCircle),
+
+            Stat::make('Maior perda', $worstTrade < 0 ? $this->formatNegativeMoney(abs($worstTrade)) : 'Sem perdas')
+                ->description('Pior operação individual')
+                ->color($worstTrade < 0 ? 'danger' : 'gray')
+                ->icon(Heroicon::OutlinedArrowDownCircle),
 
             Stat::make('Total de trades', number_format($totalTrades, 0, ',', '.'))
                 ->color($totalTrades > 0 ? 'primary' : 'gray')

@@ -52,6 +52,7 @@ class PortfoliosTable
                     }),
                 TextColumn::make('name')
                     ->label('Nome')
+                    ->limit(40)
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('total_profit')
